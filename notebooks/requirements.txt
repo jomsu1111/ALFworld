@@ -1,0 +1,6 @@
+alfworld==0.4.2
+transformers>=4.43.0
+accelerate>=0.34.0
+sentencepiece>=0.2.0
+bitsandbytes>=0.43.0
+PyYAML>=6.0
