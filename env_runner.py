@@ -1,9 +1,73 @@
+import re
 from typing import Dict, List, Tuple
 
 from alfworld.agents.environment import get_environment
 
 from alfworld_utils import map_split_name
 from model_client import LlamaActionPolicy
+
+
+def _infer_task_type(infos: Dict, observation: str) -> str:
+    gamefile_candidates = []
+    if "extra.gamefile" in infos and infos["extra.gamefile"]:
+        gamefile_candidates.extend([str(x) for x in infos["extra.gamefile"] if x])
+    if "gamefile" in infos and infos["gamefile"]:
+        gamefile_candidates.extend([str(x) for x in infos["gamefile"] if x])
+
+    joined = " ".join(gamefile_candidates).lower() + " " + observation.lower()
+    task_types = [
+        "pick_and_place_simple",
+        "look_at_obj_in_light",
+        "pick_clean_then_place_in_recep",
+        "pick_heat_then_place_in_recep",
+        "pick_cool_then_place_in_recep",
+        "pick_two_obj_and_place",
+    ]
+    for task in task_types:
+        if task in joined:
+            return task
+
+    # Fallback heuristic from instruction wording.
+    if re.search(r"\bclean\b", joined):
+        return "pick_clean_then_place_in_recep"
+    if re.search(r"\bheat|hot\b", joined):
+        return "pick_heat_then_place_in_recep"
+    if re.search(r"\bcool|cold|chill\b", joined):
+        return "pick_cool_then_place_in_recep"
+    if re.search(r"\blight|lamp\b", joined):
+        return "look_at_obj_in_light"
+    if re.search(r"\btwo\b", joined):
+        return "pick_two_obj_and_place"
+    return "pick_and_place_simple"
+
+
+def _is_stuck_transition(action: str, next_observation: str, prev_observation: str) -> bool:
+    text = next_observation.lower()
+    stuck_signals = (
+        "nothing happens",
+        "you can't",
+        "cannot",
+        "not possible",
+        "can't see any",
+        "there is no",
+        "you are not carrying",
+        "is closed",
+    )
+    if any(sig in text for sig in stuck_signals):
+        return True
+    return next_observation.strip() == prev_observation.strip()
+
+
+def _build_reflection(action: str, observation: str, admissible: List[str]) -> str:
+    if "closed" in observation.lower():
+        return f"Action '{action}' failed due to closed receptacle. Prefer open-before-put/take when available."
+    if "not carrying" in observation.lower():
+        return f"Action '{action}' failed without inventory object. Prefer take before interact actions."
+    if "nothing happens" in observation.lower() or "cannot" in observation.lower() or "can't" in observation.lower():
+        return f"Action '{action}' caused no progress. Choose a different subgoal from admissible actions."
+    if "look" in [cmd.lower() for cmd in admissible]:
+        return f"Action '{action}' did not improve state. Use look/explore/open to reveal missing affordances."
+    return f"Action '{action}' did not improve progress. Avoid repeating it in same state."
 
 
 def build_env(config: Dict, split: str):
@@ -27,27 +91,43 @@ def run_episodes(
     for ep in range(episodes):
         obs, infos = env.reset()
         observation = obs[0]
+        task_type = _infer_task_type(infos, observation)
         done = False
         step_count = 0
         trajectory: List[Tuple[str, str]] = []
+        reflections: List[str] = []
         last_score = 0.0
         won = False
 
         while not done and step_count < max_steps:
             admissible = list(infos["admissible_commands"][0])
-            action, raw_model_output = policy.select_action(observation, admissible, trajectory)
+            action, _raw_model_output = policy.select_action(
+                observation=observation,
+                admissible_commands=admissible,
+                trajectory=trajectory,
+                task_type=task_type,
+                reflections=reflections,
+            )
+            prev_observation = observation
+            prev_score = last_score
+
             obs, scores, dones, infos = env.step([action])
             next_observation = obs[0]
             done = bool(dones[0])
             last_score = float(scores[0])
             won = bool(infos.get("won", [False])[0]) or won
             trajectory.append((action, next_observation))
+
+            # Reflexion memory update on low-progress or invalid transitions.
+            if last_score <= prev_score and _is_stuck_transition(action, next_observation, prev_observation):
+                reflections.append(_build_reflection(action, next_observation, admissible))
+
             observation = next_observation
             step_count += 1
 
             print(
-                f"[episode {ep + 1:03d} step {step_count:02d}] action={action!r} "
-                f"score={last_score:.3f} done={done} won={won} model={raw_model_output!r}"
+                f"[episode {ep + 1:03d} step {step_count:02d}] task={task_type} action={action!r} "
+                f"score={last_score:.3f} done={done} won={won}"
             )
 
         success = bool(won or last_score >= 1.0)
@@ -57,14 +137,17 @@ def run_episodes(
 
         rec = {
             "episode": ep + 1,
+            "task_type": task_type,
             "success": success,
             "won": bool(won),
             "score": float(last_score),
             "steps": int(step_count),
+            "reflections": reflections,
         }
         results.append(rec)
         print(
-            f"[episode {ep + 1:03d} done] success={success} score={last_score:.3f} steps={step_count}"
+            f"[episode {ep + 1:03d} done] task={task_type} success={success} "
+            f"score={last_score:.3f} steps={step_count}"
         )
 
     return {

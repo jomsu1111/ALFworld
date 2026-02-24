@@ -1,7 +1,7 @@
 import difflib
 import re
 from dataclasses import dataclass
-from typing import Dict, Sequence, Tuple
+from typing import Dict, List, Sequence, Tuple
 
 import torch
 from transformers import AutoModelForCausalLM, AutoTokenizer, BitsAndBytesConfig
@@ -9,6 +9,72 @@ from transformers import AutoModelForCausalLM, AutoTokenizer, BitsAndBytesConfig
 
 def _normalize_action(text: str) -> str:
     return re.sub(r"\s+", " ", text.strip().lower())
+
+
+TASK_TYPES: Tuple[str, ...] = (
+    "pick_and_place_simple",
+    "look_at_obj_in_light",
+    "pick_clean_then_place_in_recep",
+    "pick_heat_then_place_in_recep",
+    "pick_cool_then_place_in_recep",
+    "pick_two_obj_and_place",
+)
+
+
+TASK_FEW_SHOTS: Dict[str, str] = {
+    "pick_and_place_simple": (
+        "Task intent: pick an object and place it into a target receptacle.\\n"
+        "Example:\\n"
+        "Observation: You need to put the apple in the fridge.\\n"
+        "Reasoning: locate apple -> take apple -> locate fridge -> open if needed -> put.\\n"
+        "Action: take apple from table"
+    ),
+    "look_at_obj_in_light": (
+        "Task intent: examine an object under proper lighting.\\n"
+        "Example:\\n"
+        "Observation: You need to examine the key under the lamp.\\n"
+        "Reasoning: find key -> take key -> locate lamp -> turn on lamp -> use examine/look.\\n"
+        "Action: turn on lamp"
+    ),
+    "pick_clean_then_place_in_recep": (
+        "Task intent: clean an object before placing it into target receptacle.\\n"
+        "Example:\\n"
+        "Observation: Put the clean mug in the cabinet.\\n"
+        "Reasoning: find mug -> take mug -> find sink -> clean mug -> go to cabinet -> put mug.\\n"
+        "Action: clean mug with sink"
+    ),
+    "pick_heat_then_place_in_recep": (
+        "Task intent: heat an object before placing it into target receptacle.\\n"
+        "Example:\\n"
+        "Observation: Put the heated soup in the dining table.\\n"
+        "Reasoning: find soup -> take soup -> find microwave/stove -> heat -> move -> put.\\n"
+        "Action: heat soup with microwave"
+    ),
+    "pick_cool_then_place_in_recep": (
+        "Task intent: cool an object before placing it into target receptacle.\\n"
+        "Example:\\n"
+        "Observation: Put the cooled soda in the bar cabinet.\\n"
+        "Reasoning: find soda -> take soda -> find fridge -> cool/chill -> move -> put.\\n"
+        "Action: cool soda with fridge"
+    ),
+    "pick_two_obj_and_place": (
+        "Task intent: place two required objects into target receptacle.\\n"
+        "Example:\\n"
+        "Observation: Put two apples in the basket.\\n"
+        "Reasoning: place first apple fully, then repeat for second apple.\\n"
+        "Action: take apple from counter"
+    ),
+}
+
+
+PDDL_STYLE_GUIDE = (
+    "ALFWorld/PDDL-style action rules (practical):\\n"
+    "1) You can only execute actions in the admissible command list.\\n"
+    "2) Preconditions matter: usually open receptacles before put/take when required.\\n"
+    "3) State-changing tasks require explicit verbs: clean/heat/cool/turn on.\\n"
+    "4) For navigation bottlenecks, use goto/open/look to reveal missing affordances.\\n"
+    "5) Prefer progress actions over repeats; if stuck, change subgoal (explore container/light source/appliance)."
+)
 
 
 @dataclass(frozen=True)
@@ -21,6 +87,9 @@ class PolicyConfig:
     top_p: float
     max_new_tokens: int
     history_window: int
+    prompting_mode: str
+    use_reflexion: bool
+    reflection_window: int
 
 
 class LlamaActionPolicy:
@@ -29,6 +98,9 @@ class LlamaActionPolicy:
         self.top_p = cfg.top_p
         self.max_new_tokens = cfg.max_new_tokens
         self.history_window = cfg.history_window
+        self.prompting_mode = cfg.prompting_mode
+        self.use_reflexion = cfg.use_reflexion
+        self.reflection_window = cfg.reflection_window
 
         quantization_config = None
         torch_dtype = torch.bfloat16 if torch.cuda.is_available() else torch.float32
@@ -58,6 +130,8 @@ class LlamaActionPolicy:
         observation: str,
         admissible_commands: Sequence[str],
         trajectory: Sequence[Tuple[str, str]],
+        task_type: str,
+        reflections: Sequence[str],
     ) -> str:
         history_slice = trajectory[-self.history_window :]
         history_lines = []
@@ -67,13 +141,39 @@ class LlamaActionPolicy:
         history_text = "\n".join(history_lines) if history_lines else "(none)"
 
         candidates = "\n".join([f"{i + 1}. {cmd}" for i, cmd in enumerate(admissible_commands)])
+        task_example = TASK_FEW_SHOTS.get(task_type, "")
+
+        reflection_text = "(none)"
+        if self.use_reflexion and reflections:
+            reflection_text = "\n".join([f"- {item}" for item in reflections[-self.reflection_window :]])
+
+        if self.prompting_mode == "react":
+            format_rules = (
+                "Output format strictly:\n"
+                "Thought: <short private reasoning about next subgoal and preconditions>\n"
+                "Action: <one exact action from candidate actions>"
+            )
+        else:
+            format_rules = "Output format: Action: <one exact action from candidate actions>"
+
         return (
             "You are an ALFWorld text-game agent. Choose the best next action to solve the task.\n"
-            "You must output exactly one action from the candidate list and nothing else.\n\n"
+            "Act with explicit precondition-aware planning and choose only from candidate actions.\n\n"
+            f"Detected task type: {task_type}\n\n"
+            "Task taxonomy (6 tasks):\n"
+            "- pick_and_place_simple\n"
+            "- look_at_obj_in_light\n"
+            "- pick_clean_then_place_in_recep\n"
+            "- pick_heat_then_place_in_recep\n"
+            "- pick_cool_then_place_in_recep\n"
+            "- pick_two_obj_and_place\n\n"
+            f"Task-specific few-shot example:\n{task_example}\n\n"
+            f"{PDDL_STYLE_GUIDE}\n\n"
+            f"Reflexion memory from failed attempts:\n{reflection_text}\n\n"
             f"Current observation:\n{observation}\n\n"
             f"Recent trajectory:\n{history_text}\n\n"
             f"Candidate actions:\n{candidates}\n\n"
-            "Output format: return only the action text."
+            f"{format_rules}"
         )
 
     def _choose_fallback(self, admissible_commands: Sequence[str]) -> str:
@@ -123,10 +223,15 @@ class LlamaActionPolicy:
         observation: str,
         admissible_commands: Sequence[str],
         trajectory: Sequence[Tuple[str, str]],
+        task_type: str,
+        reflections: Sequence[str],
     ) -> Tuple[str, str]:
-        prompt = self.build_prompt(observation, admissible_commands, trajectory)
+        prompt = self.build_prompt(observation, admissible_commands, trajectory, task_type, reflections)
         messages = [
-            {"role": "system", "content": "You are a precise decision-making agent for ALFWorld."},
+            {
+                "role": "system",
+                "content": "You are a precise decision-making ALFWorld agent using ReAct-style planning.",
+            },
             {"role": "user", "content": prompt},
         ]
         model_inputs = self.tokenizer.apply_chat_template(
@@ -165,6 +270,9 @@ def get_llama_action_policy(
     top_p: float,
     max_new_tokens: int,
     history_window: int,
+    prompting_mode: str = "react",
+    use_reflexion: bool = True,
+    reflection_window: int = 4,
     reuse: bool = True,
 ) -> LlamaActionPolicy:
     cfg = PolicyConfig(
@@ -176,6 +284,9 @@ def get_llama_action_policy(
         top_p=top_p,
         max_new_tokens=max_new_tokens,
         history_window=history_window,
+        prompting_mode=prompting_mode,
+        use_reflexion=use_reflexion,
+        reflection_window=reflection_window,
     )
     if reuse and cfg in _POLICY_CACHE:
         return _POLICY_CACHE[cfg]

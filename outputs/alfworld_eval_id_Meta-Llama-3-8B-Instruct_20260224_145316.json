@@ -1,0 +1,26 @@
+{
+  "timestamp": "2026-02-24T14:53:16.945091",
+  "model_id": "meta-llama/Meta-Llama-3-8B-Instruct",
+  "split": "eval_id",
+  "episodes": 2,
+  "max_steps": 30,
+  "success_rate": 0.0,
+  "avg_score": 0.0,
+  "avg_steps": 30.0,
+  "results": [
+    {
+      "episode": 1,
+      "success": false,
+      "won": false,
+      "score": 0.0,
+      "steps": 30
+    },
+    {
+      "episode": 2,
+      "success": false,
+      "won": false,
+      "score": 0.0,
+      "steps": 30
+    }
+  ]
+}
