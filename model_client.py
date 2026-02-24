@@ -1,8 +1,7 @@
-import ast
 import difflib
 import re
 from dataclasses import dataclass
-from typing import Any, Dict, Sequence, Tuple
+from typing import Dict, Sequence, Tuple
 
 import torch
 from transformers import AutoModelForCausalLM, AutoTokenizer, BitsAndBytesConfig
@@ -69,12 +68,10 @@ TASK_FEW_SHOTS: Dict[str, str] = {
 
 
 PDDL_STYLE_GUIDE = (
-    "ALFWorld/PDDL-style action rules (practical):\\n"
-    "1) You can only execute actions in the admissible command list.\\n"
-    "2) Preconditions matter: usually open receptacles before put/take when required.\\n"
-    "3) State-changing tasks require explicit verbs: clean/heat/cool/turn on.\\n"
-    "4) For navigation bottlenecks, use goto/open/look to reveal missing affordances.\\n"
-    "5) Prefer progress actions over repeats; if stuck, change subgoal (explore container/light source/appliance)."
+    "ALFWorld/PDDL guide:\\n"
+    "1) Always choose exactly one action from admissible commands.\\n"
+    "2) Satisfy preconditions first (e.g., open before put/take).\\n"
+    "3) After clean/heat/cool, transition to placing the object in target receptacle."
 )
 
 
@@ -95,7 +92,7 @@ class PolicyConfig:
 
 class LlamaActionPolicy:
     def __init__(self, cfg: PolicyConfig) -> None:
-        self.temperature = min(max(cfg.temperature, 0.0), 0.2)
+        self.temperature = cfg.temperature
         self.top_p = cfg.top_p
         self.max_new_tokens = cfg.max_new_tokens
         self.history_window = cfg.history_window
@@ -133,7 +130,6 @@ class LlamaActionPolicy:
         trajectory: Sequence[Tuple[str, str]],
         task_type: str,
         reflections: Sequence[str],
-        belief_state: Dict[str, Any],
     ) -> str:
         history_slice = trajectory[-self.history_window :]
         history_lines = []
@@ -149,30 +145,11 @@ class LlamaActionPolicy:
         if self.use_reflexion and reflections:
             reflection_text = "\n".join([f"- {item}" for item in reflections[-self.reflection_window :]])
 
-        if self.prompting_mode == "react":
-            format_rules = (
-                "Output format strictly:\n"
-                "BeliefUpdate:\n"
-                "  CompletedSubgoals: [ ... ]\n"
-                "  Inventory: [ ... ]\n"
-                "  ObjectStates: { ... }\n"
-                "  LoopCounter: <int>\n"
-                "Reasoning:\n"
-                "  Thought: <short reasoning about next subgoal and preconditions>\n"
-                "Action: <one exact action from candidate actions>"
-            )
-        else:
-            format_rules = (
-                "Output format strictly:\n"
-                "BeliefUpdate:\n"
-                "  CompletedSubgoals: [ ... ]\n"
-                "  Inventory: [ ... ]\n"
-                "  ObjectStates: { ... }\n"
-                "  LoopCounter: <int>\n"
-                "Reasoning:\n"
-                "  Thought: <short reasoning>\n"
-                "Action: <one exact action from candidate actions>"
-            )
+        format_rules = (
+            "Output format strictly:\n"
+            "Thought: <short reasoning>\n"
+            "Action: <one exact action from candidate actions>"
+        )
 
         return (
             "You are an ALFWorld text-game agent. Choose the best next action to solve the task.\n"
@@ -190,13 +167,7 @@ class LlamaActionPolicy:
             "Subgoal transition rule:\n"
             "- If a subgoal is completed, explicitly mark it in CompletedSubgoals and choose the next subgoal.\n"
             "- After heating/cooling/cleaning an object, you must transition to placing it in the target receptacle.\n\n"
-            f"Reflexion memory from failed attempts:\n{reflection_text}\n\n"
-            "Current structured belief state:\n"
-            f"BeliefState:\n"
-            f"  CompletedSubgoals: {belief_state.get('CompletedSubgoals', [])}\n"
-            f"  Inventory: {belief_state.get('Inventory', [])}\n"
-            f"  ObjectStates: {belief_state.get('ObjectStates', {})}\n"
-            f"  LoopCounter: {belief_state.get('LoopCounter', 0)}\n\n"
+            f"Previous mistakes:\n{reflection_text}\n\n"
             f"Current observation:\n{observation}\n\n"
             f"Recent trajectory:\n{history_text}\n\n"
             f"Candidate actions:\n{candidates}\n\n"
@@ -209,13 +180,25 @@ class LlamaActionPolicy:
                 return cmd
         return admissible_commands[0]
 
-    def _match_action(self, raw_text: str, admissible_commands: Sequence[str]) -> str:
-        cleaned = raw_text.strip().strip('"').strip("'")
-        normalized_map = {_normalize_action(c): c for c in admissible_commands}
+    def _extract_action_candidate(self, raw_text: str) -> str:
+        # BeliefUpdate 블록의 "Inventory:"를 액션으로 오인하지 않도록
+        # Action/Answer 라인만 우선적으로 추출한다.
+        action_lines = re.findall(
+            r"(?:^|\n)\s*(?:action|answer)\s*:\s*(.+)",
+            raw_text,
+            flags=re.IGNORECASE,
+        )
+        if action_lines:
+            return action_lines[-1].strip().strip('"').strip("'")
 
-        label_match = re.search(r"(?:^|\n)\s*(?:action|answer)\s*:\s*(.+)", cleaned, flags=re.IGNORECASE)
-        if label_match:
-            cleaned = label_match.group(1).strip().strip('"').strip("'")
+        lines = [line.strip() for line in raw_text.splitlines() if line.strip()]
+        if not lines:
+            return ""
+        return lines[-1].strip().strip('"').strip("'")
+
+    def _match_action(self, raw_text: str, admissible_commands: Sequence[str]) -> str:
+        cleaned = self._extract_action_candidate(raw_text)
+        normalized_map = {_normalize_action(c): c for c in admissible_commands}
 
         norm = _normalize_action(cleaned)
         if norm in normalized_map:
@@ -227,56 +210,11 @@ class LlamaActionPolicy:
             if 0 <= idx < len(admissible_commands):
                 return admissible_commands[idx]
 
-        for line in cleaned.splitlines():
-            line_norm = _normalize_action(
-                line.replace("Action:", "").replace("action:", "").strip().strip('"').strip("'")
-            )
-            if line_norm in normalized_map:
-                return normalized_map[line_norm]
-
-        for cmd in admissible_commands:
-            if _normalize_action(cmd) in norm:
-                return cmd
-
         near = difflib.get_close_matches(norm, list(normalized_map.keys()), n=1, cutoff=0.55)
         if near:
             return normalized_map[near[0]]
 
         return self._choose_fallback(admissible_commands)
-
-    def _extract_belief_update(self, raw_text: str, prev_belief: Dict[str, Any]) -> Dict[str, Any]:
-        belief = {
-            "CompletedSubgoals": list(prev_belief.get("CompletedSubgoals", [])),
-            "Inventory": list(prev_belief.get("Inventory", [])),
-            "ObjectStates": dict(prev_belief.get("ObjectStates", {})),
-            "LoopCounter": int(prev_belief.get("LoopCounter", 0)),
-        }
-        patterns = {
-            "CompletedSubgoals": r"CompletedSubgoals\s*:\s*(\[[^\n]*\])",
-            "Inventory": r"Inventory\s*:\s*(\[[^\n]*\])",
-            "ObjectStates": r"ObjectStates\s*:\s*(\{[^\n]*\})",
-            "LoopCounter": r"LoopCounter\s*:\s*(-?\d+)",
-        }
-        for key, pattern in patterns.items():
-            m = re.search(pattern, raw_text, flags=re.IGNORECASE)
-            if not m:
-                continue
-            value = m.group(1).strip()
-            if key in {"CompletedSubgoals", "Inventory", "ObjectStates"}:
-                try:
-                    parsed = ast.literal_eval(value)
-                    if key != "ObjectStates" and isinstance(parsed, list):
-                        belief[key] = [str(x) for x in parsed]
-                    if key == "ObjectStates" and isinstance(parsed, dict):
-                        belief[key] = {str(k): str(v) for k, v in parsed.items()}
-                except Exception:
-                    continue
-            else:
-                try:
-                    belief[key] = max(0, int(value))
-                except ValueError:
-                    continue
-        return belief
 
     @torch.no_grad()
     def select_action(
@@ -286,15 +224,13 @@ class LlamaActionPolicy:
         trajectory: Sequence[Tuple[str, str]],
         task_type: str,
         reflections: Sequence[str],
-        belief_state: Dict[str, Any],
-    ) -> Tuple[str, str, Dict[str, Any]]:
+    ) -> Tuple[str, str]:
         prompt = self.build_prompt(
             observation,
             admissible_commands,
             trajectory,
             task_type,
             reflections,
-            belief_state,
         )
         messages = [
             {
@@ -313,20 +249,17 @@ class LlamaActionPolicy:
         generated = self.model.generate(
             **model_inputs,
             max_new_tokens=self.max_new_tokens,
-            do_sample=self.temperature > 0,
-            temperature=self.temperature if self.temperature > 0 else None,
-            top_p=self.top_p,
+            do_sample=False,
             pad_token_id=self.tokenizer.pad_token_id,
             eos_token_id=self.tokenizer.eos_token_id,
         )
         prompt_len = model_inputs["input_ids"].shape[-1]
         new_tokens = generated[0][prompt_len:]
         raw_text = self.tokenizer.decode(new_tokens, skip_special_tokens=True).strip()
-        belief_update = self._extract_belief_update(raw_text, belief_state)
         action = self._match_action(raw_text, admissible_commands)
         if action not in admissible_commands:
             action = self._choose_fallback(admissible_commands)
-        return action, raw_text, belief_update
+        return action, raw_text
 
 
 _POLICY_CACHE: Dict[PolicyConfig, LlamaActionPolicy] = {}
