@@ -1,7 +1,8 @@
+import ast
 import difflib
 import re
 from dataclasses import dataclass
-from typing import Dict, List, Sequence, Tuple
+from typing import Any, Dict, Sequence, Tuple
 
 import torch
 from transformers import AutoModelForCausalLM, AutoTokenizer, BitsAndBytesConfig
@@ -94,7 +95,7 @@ class PolicyConfig:
 
 class LlamaActionPolicy:
     def __init__(self, cfg: PolicyConfig) -> None:
-        self.temperature = cfg.temperature
+        self.temperature = min(max(cfg.temperature, 0.0), 0.2)
         self.top_p = cfg.top_p
         self.max_new_tokens = cfg.max_new_tokens
         self.history_window = cfg.history_window
@@ -132,6 +133,7 @@ class LlamaActionPolicy:
         trajectory: Sequence[Tuple[str, str]],
         task_type: str,
         reflections: Sequence[str],
+        belief_state: Dict[str, Any],
     ) -> str:
         history_slice = trajectory[-self.history_window :]
         history_lines = []
@@ -150,11 +152,27 @@ class LlamaActionPolicy:
         if self.prompting_mode == "react":
             format_rules = (
                 "Output format strictly:\n"
-                "Thought: <short private reasoning about next subgoal and preconditions>\n"
+                "BeliefUpdate:\n"
+                "  CompletedSubgoals: [ ... ]\n"
+                "  Inventory: [ ... ]\n"
+                "  ObjectStates: { ... }\n"
+                "  LoopCounter: <int>\n"
+                "Reasoning:\n"
+                "  Thought: <short reasoning about next subgoal and preconditions>\n"
                 "Action: <one exact action from candidate actions>"
             )
         else:
-            format_rules = "Output format: Action: <one exact action from candidate actions>"
+            format_rules = (
+                "Output format strictly:\n"
+                "BeliefUpdate:\n"
+                "  CompletedSubgoals: [ ... ]\n"
+                "  Inventory: [ ... ]\n"
+                "  ObjectStates: { ... }\n"
+                "  LoopCounter: <int>\n"
+                "Reasoning:\n"
+                "  Thought: <short reasoning>\n"
+                "Action: <one exact action from candidate actions>"
+            )
 
         return (
             "You are an ALFWorld text-game agent. Choose the best next action to solve the task.\n"
@@ -169,7 +187,16 @@ class LlamaActionPolicy:
             "- pick_two_obj_and_place\n\n"
             f"Task-specific few-shot example:\n{task_example}\n\n"
             f"{PDDL_STYLE_GUIDE}\n\n"
+            "Subgoal transition rule:\n"
+            "- If a subgoal is completed, explicitly mark it in CompletedSubgoals and choose the next subgoal.\n"
+            "- After heating/cooling/cleaning an object, you must transition to placing it in the target receptacle.\n\n"
             f"Reflexion memory from failed attempts:\n{reflection_text}\n\n"
+            "Current structured belief state:\n"
+            f"BeliefState:\n"
+            f"  CompletedSubgoals: {belief_state.get('CompletedSubgoals', [])}\n"
+            f"  Inventory: {belief_state.get('Inventory', [])}\n"
+            f"  ObjectStates: {belief_state.get('ObjectStates', {})}\n"
+            f"  LoopCounter: {belief_state.get('LoopCounter', 0)}\n\n"
             f"Current observation:\n{observation}\n\n"
             f"Recent trajectory:\n{history_text}\n\n"
             f"Candidate actions:\n{candidates}\n\n"
@@ -217,6 +244,40 @@ class LlamaActionPolicy:
 
         return self._choose_fallback(admissible_commands)
 
+    def _extract_belief_update(self, raw_text: str, prev_belief: Dict[str, Any]) -> Dict[str, Any]:
+        belief = {
+            "CompletedSubgoals": list(prev_belief.get("CompletedSubgoals", [])),
+            "Inventory": list(prev_belief.get("Inventory", [])),
+            "ObjectStates": dict(prev_belief.get("ObjectStates", {})),
+            "LoopCounter": int(prev_belief.get("LoopCounter", 0)),
+        }
+        patterns = {
+            "CompletedSubgoals": r"CompletedSubgoals\s*:\s*(\[[^\n]*\])",
+            "Inventory": r"Inventory\s*:\s*(\[[^\n]*\])",
+            "ObjectStates": r"ObjectStates\s*:\s*(\{[^\n]*\})",
+            "LoopCounter": r"LoopCounter\s*:\s*(-?\d+)",
+        }
+        for key, pattern in patterns.items():
+            m = re.search(pattern, raw_text, flags=re.IGNORECASE)
+            if not m:
+                continue
+            value = m.group(1).strip()
+            if key in {"CompletedSubgoals", "Inventory", "ObjectStates"}:
+                try:
+                    parsed = ast.literal_eval(value)
+                    if key != "ObjectStates" and isinstance(parsed, list):
+                        belief[key] = [str(x) for x in parsed]
+                    if key == "ObjectStates" and isinstance(parsed, dict):
+                        belief[key] = {str(k): str(v) for k, v in parsed.items()}
+                except Exception:
+                    continue
+            else:
+                try:
+                    belief[key] = max(0, int(value))
+                except ValueError:
+                    continue
+        return belief
+
     @torch.no_grad()
     def select_action(
         self,
@@ -225,8 +286,16 @@ class LlamaActionPolicy:
         trajectory: Sequence[Tuple[str, str]],
         task_type: str,
         reflections: Sequence[str],
-    ) -> Tuple[str, str]:
-        prompt = self.build_prompt(observation, admissible_commands, trajectory, task_type, reflections)
+        belief_state: Dict[str, Any],
+    ) -> Tuple[str, str, Dict[str, Any]]:
+        prompt = self.build_prompt(
+            observation,
+            admissible_commands,
+            trajectory,
+            task_type,
+            reflections,
+            belief_state,
+        )
         messages = [
             {
                 "role": "system",
@@ -253,8 +322,11 @@ class LlamaActionPolicy:
         prompt_len = model_inputs["input_ids"].shape[-1]
         new_tokens = generated[0][prompt_len:]
         raw_text = self.tokenizer.decode(new_tokens, skip_special_tokens=True).strip()
+        belief_update = self._extract_belief_update(raw_text, belief_state)
         action = self._match_action(raw_text, admissible_commands)
-        return action, raw_text
+        if action not in admissible_commands:
+            action = self._choose_fallback(admissible_commands)
+        return action, raw_text, belief_update
 
 
 _POLICY_CACHE: Dict[PolicyConfig, LlamaActionPolicy] = {}
