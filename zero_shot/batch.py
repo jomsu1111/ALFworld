@@ -1,28 +1,30 @@
 # 실행 예시:
-# uv run batch.py --config alfworld/configs/eval_config.yaml --split eval_out_of_distribution --seed 42 --num-games 100 --concurrency 4 --progress-every 10 --base-url http://localhost:8000/v1/ --api-key <YOUR_API_KEY> --model meta-llama/Llama-3.1-8B-Instruct
+# uv run batch.py --config configs/alfworld_llama3_zeroshot.yaml --split eval_out_of_distribution --seed 42 --num-games 100 --concurrency 4 --progress-every 10 --model meta-llama/Llama-3.1-8B-Instruct --hf-token <YOUR_HF_TOKEN>
 # (기본값 사용 시) uv run batch.py
 
 import argparse
 import copy
-import json
 import os
 import random
+import sys
 import threading
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 import yaml
-from openai import OpenAI
 
 from alfworld.agents.environment import get_environment
 from llm_alfworld_utils import (
     build_turn_context,
-    normalize_model_output_to_command,
-    strip_think_tags,
-    trim_history,
 )
+
+ROOT_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+if ROOT_DIR not in sys.path:
+    sys.path.insert(0, ROOT_DIR)
+from model_client import get_llama_action_policy
 
 
 ENV_OP_LOCK = threading.Lock()
+MODEL_OP_LOCK = threading.Lock()
 
 
 def first_or_default(value, default=None):
@@ -48,26 +50,21 @@ def resolve_goal(turn_context):
     )
 
 
-def run_one_episode(env, client, model_name, env_type, session_id):
+def run_one_episode(env, policy, env_type, session_id):
     with ENV_OP_LOCK:
         obs, infos = env.reset()
 
-    system_prompt = (
-        "You are an agent that interacts with an environment. "
-        "The environment provides observations, task/goal context, and a list of admissible commands. "
-        "Always pick exactly one command from the admissible commands list. "
-        "Return only the command text and nothing else."
-    )
-
-    messages = [{"role": "system", "content": system_prompt}]
     turn_idx = 0
     previous_action = "restart"
     last_printed_goal = None
+    trajectory = []
+    reflections = []
 
     while True:
         current_obs = obs[0]
         turn_context = build_turn_context(turn_idx, current_obs, infos, previous_action, env_type)
         admissible_commands = turn_context["admissible_commands"]
+        task_type = turn_context.get("trajectory_context", {}).get("task_type", "") or "pick_and_place_simple"
 
         if not admissible_commands:
             raise RuntimeError("No admissible commands available in infos['admissible_commands'].")
@@ -77,34 +74,27 @@ def run_one_episode(env, client, model_name, env_type, session_id):
             print("[세션 {}] 행동 목표: {}".format(session_id, behavior_goal))
             last_printed_goal = behavior_goal
 
-        user_payload = {
-            "instruction": "Choose exactly one command from admissible_commands.",
-            "context": turn_context,
-        }
-        messages.append({
-            "role": "user",
-            "content": json.dumps(user_payload, ensure_ascii=False, indent=2)
-        })
-        messages = trim_history(messages)
-
-        response = client.chat.completions.create(
-            model=model_name,
-            messages=messages,
-            max_tokens=4000,
-        )
-
-        raw_model_output = response.choices[0].message.content or ""
-        model_output = strip_think_tags(raw_model_output)
-        command = normalize_model_output_to_command(model_output, admissible_commands)
-        if not command:
+        with MODEL_OP_LOCK:
+            command, _raw_model_output = policy.select_action(
+                observation=current_obs,
+                admissible_commands=admissible_commands,
+                trajectory=trajectory,
+                task_type=task_type,
+                reflections=reflections,
+            )
+        if command not in admissible_commands:
             command = "look" if "look" in admissible_commands else random.choice(admissible_commands)
 
         print("[세션 {}] 파싱 응답: {}".format(session_id, command))
 
-        messages.append({"role": "assistant", "content": command})
-
         with ENV_OP_LOCK:
             obs, scores, dones, infos = env.step([command])
+        trajectory.append((command, obs[0]))
+
+        if len(trajectory) >= 3 and trajectory[-1][0] == trajectory[-2][0] == trajectory[-3][0]:
+            reflections.append("동일 액션 반복을 피하고 다른 admissible action으로 하위 목표를 전환하라.")
+            reflections = reflections[-4:]
+
         previous_action = command
         turn_idx += 1
 
@@ -122,9 +112,7 @@ def run_single_game(
     env_prototype,
     env_type,
     seed,
-    base_url,
-    api_key,
-    model_name,
+    policy,
 ):
     print("\n[{} / ?] [세션 {}] Running game: {}".format(game_index, session_id, game_file))
 
@@ -138,13 +126,8 @@ def run_single_game(
         with ENV_OP_LOCK:
             env.seed(seed + game_index)
 
-    client = OpenAI(
-        base_url=base_url,
-        api_key=api_key,
-    )
-
     try:
-        won, gc_sr, score = run_one_episode(env, client, model_name, env_type, session_id)
+        won, gc_sr, score = run_one_episode(env, policy, env_type, session_id)
         return game_index, session_id, won, gc_sr, score
     finally:
         if hasattr(env, "close"):
@@ -156,7 +139,7 @@ def main():
     parser = argparse.ArgumentParser(description="Run fixed-seed batch evaluation on ALFWorld eval split.")
     parser.add_argument(
         "--config",
-        default="alfworld/configs/eval_config.yaml",
+        default="configs/alfworld_llama3_zeroshot.yaml",
         help="Path to ALFWorld config yaml",
     )
     parser.add_argument(
@@ -169,9 +152,10 @@ def main():
     parser.add_argument("--num-games", type=int, default=100, help="Number of games to evaluate")
     parser.add_argument("--concurrency", type=int, default=4, help="Number of concurrent sessions")
     parser.add_argument("--progress-every", type=int, default=10, help="Print progress every N games")
-    parser.add_argument("--base-url", default="http://localhost:8000/v1/", help="OpenAI-compatible base URL")
-    parser.add_argument("--api-key", default=os.getenv("OPENAI_API_KEY", ""), help="API key")
     parser.add_argument("--model", default="meta-llama/Llama-3.1-8B-Instruct", help="Model name")
+    parser.add_argument("--hf-token", default=os.getenv("HF_TOKEN", ""), help="Hugging Face token")
+    parser.add_argument("--device-map", default="auto", help="Transformers device_map")
+    parser.add_argument("--load-in-4bit", action="store_true", help="Load model in 4-bit")
     args = parser.parse_args()
 
     if not os.path.exists(args.config):
@@ -181,6 +165,8 @@ def main():
         raise ValueError("--progress-every must be > 0")
     if args.concurrency <= 0:
         raise ValueError("--concurrency must be > 0")
+    if not args.hf_token:
+        raise ValueError("HF token is required. Pass --hf-token or set HF_TOKEN.")
 
     random.seed(args.seed)
 
@@ -190,6 +176,21 @@ def main():
     print("Eval split: {}".format(args.split))
     print("Fixed seed: {}".format(args.seed))
     print("Concurrency: {}".format(args.concurrency))
+
+    policy = get_llama_action_policy(
+        model_id=args.model,
+        hf_token=args.hf_token,
+        device_map=args.device_map,
+        load_in_4bit=args.load_in_4bit,
+        temperature=0.0,
+        top_p=1.0,
+        max_new_tokens=64,
+        history_window=8,
+        prompting_mode="react",
+        use_reflexion=True,
+        reflection_window=4,
+        reuse=True,
+    )
 
     env_prototype = get_environment(env_type)(config, train_eval=args.split)
     all_games = list(getattr(env_prototype, "game_files", []))
@@ -231,9 +232,7 @@ def main():
                         env_prototype,
                         env_type,
                         args.seed,
-                        args.base_url,
-                        args.api_key,
-                        args.model,
+                        policy,
                     )
                 )
 

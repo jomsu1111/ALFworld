@@ -22,56 +22,85 @@ TASK_TYPES: Tuple[str, ...] = (
 
 
 TASK_FEW_SHOTS: Dict[str, str] = {
+
     "pick_and_place_simple": (
-        "Task intent: pick an object and place it into a target receptacle.\\n"
-        "Example:\\n"
-        "Observation: You need to put the apple in the fridge.\\n"
-        "Reasoning: locate apple -> take apple -> locate fridge -> open if needed -> put.\\n"
-        "Action: take apple from table"
+        "Task intent: pick an object and place it into a target receptacle.\n"
+        "Example:\n"
+        "Goal: put a apple in fridge.\n"
+        "Observation: You are in the kitchen. On table 1, you see a apple 1. The fridge 1 is closed.\n"
+        "Thought: The apple is on table 1. I should take it first.\n"
+        "Action: take apple 1 from table 1\n"
     ),
+
     "look_at_obj_in_light": (
-        "Task intent: examine an object under proper lighting.\\n"
-        "Example:\\n"
-        "Observation: You need to examine the key under the lamp.\\n"
-        "Reasoning: find key -> take key -> locate lamp -> turn on lamp -> use examine/look.\\n"
-        "Action: turn on lamp"
+        "Task intent: examine an object under proper lighting.\n"
+        "Example:\n"
+        "Goal: examine a key under the lamp.\n"
+        "Observation: On table 1, you see a key 1. The lamp 1 is off.\n"
+        "Thought: I need the key in hand before examining it.\n"
+        "Action: take key 1 from table 1\n"
     ),
+
     "pick_clean_then_place_in_recep": (
-        "Task intent: clean an object before placing it into target receptacle.\\n"
-        "Example:\\n"
-        "Observation: Put the clean mug in the cabinet.\\n"
-        "Reasoning: find mug -> take mug -> find sink -> clean mug -> go to cabinet -> put mug.\\n"
-        "Action: clean mug with sink"
+        "Task intent: clean an object before placing it into target receptacle.\n"
+        "Example:\n"
+        "Goal: put a clean mug in cabinet 1.\n"
+        "Observation: On table 1, you see a mug 1. The sinkbasin 1 is empty.\n"
+        "Thought: The mug must be cleaned first. I should take it.\n"
+        "Action: take mug 1 from table 1\n"
     ),
+
     "pick_heat_then_place_in_recep": (
-        "Task intent: heat an object before placing it into target receptacle.\\n"
-        "Example:\\n"
-        "Observation: Put the heated soup in the dining table.\\n"
-        "Reasoning: find soup -> take soup -> find microwave/stove -> heat -> move -> put.\\n"
-        "Action: heat soup with microwave"
+        "Task intent: heat an object before placing it into target receptacle.\n"
+        "Example:\n"
+        "Goal: put a hot soup in diningtable 1.\n"
+        "Observation: On countertop 1, you see a soup 1. The microwave 1 is closed.\n"
+        "Thought: I need to take the soup before heating it.\n"
+        "Action: take soup 1 from countertop 1\n"
     ),
+
     "pick_cool_then_place_in_recep": (
-        "Task intent: cool an object before placing it into target receptacle.\\n"
-        "Example:\\n"
-        "Observation: Put the cooled soda in the bar cabinet.\\n"
-        "Reasoning: find soda -> take soda -> find fridge -> cool/chill -> move -> put.\\n"
-        "Action: cool soda with fridge"
+        "Task intent: cool an object before placing it into target receptacle.\n"
+        "Example:\n"
+        "Goal: put a cool soda in cabinet 1.\n"
+        "Observation: On table 1, you see a soda 1. The fridge 1 is closed.\n"
+        "Thought: I should take the soda before cooling it.\n"
+        "Action: take soda 1 from table 1\n"
     ),
+
     "pick_two_obj_and_place": (
-        "Task intent: place two required objects into target receptacle.\\n"
-        "Example:\\n"
-        "Observation: Put two apples in the basket.\\n"
-        "Reasoning: place first apple fully, then repeat for second apple.\\n"
-        "Action: take apple from counter"
+        "Task intent: place two required objects into target receptacle.\n"
+        "Example:\n"
+        "Goal: put two apple in basket 1.\n"
+        "Observation: On counter 1, you see a apple 1 and a apple 2.\n"
+        "Thought: I should handle one apple at a time, starting with apple 1.\n"
+        "Action: take apple 1 from counter 1\n"
     ),
 }
 
-
 PDDL_STYLE_GUIDE = (
-    "ALFWorld/PDDL guide:\\n"
-    "1) Always choose exactly one action from admissible commands.\\n"
-    "2) Satisfy preconditions first (e.g., open before put/take).\\n"
-    "3) After clean/heat/cool, transition to placing the object in target receptacle."
+    "ALFWorld / PDDL action constraints:\n"
+    "1) Output exactly ONE admissible action string.\n"
+    "2) Valid action formats are strictly:\n"
+    "   - goto <recep>\n"
+    "   - take <obj> from <recep>\n"
+    "   - put <obj> in/on <recep>\n"
+    "   - open <recep>\n"
+    "   - close <recep>\n"
+    "   - clean <obj> with <recep>\n"
+    "   - heat <obj> with <recep>\n"
+    "   - cool <obj> with <recep>\n"
+    "   - toggle <obj>\n"
+    "\n"
+    "3) Preconditions:\n"
+    "   - Must goto a receptacle before interacting with it.\n"
+    "   - Must open a closed receptacle before take/put inside it.\n"
+    "   - Must take an object before clean/heat/cool it.\n"
+    "   - Must hold the object before put.\n"
+    "\n"
+    "4) Only hold ONE object at a time.\n"
+    "5) If action fails (Nothing happens), reconsider location or preconditions.\n"
+    "6) After clean/heat/cool, next goal is to place the object in target receptacle."
 )
 
 
@@ -128,9 +157,10 @@ class LlamaActionPolicy:
         observation: str,
         admissible_commands: Sequence[str],
         trajectory: Sequence[Tuple[str, str]],
-        task_type: str,
         reflections: Sequence[str],
     ) -> str:
+
+        # ===== Recent trajectory =====
         history_slice = trajectory[-self.history_window :]
         history_lines = []
         for idx, (action, obs_text) in enumerate(history_slice, 1):
@@ -138,40 +168,41 @@ class LlamaActionPolicy:
             history_lines.append(f"   observation={obs_text}")
         history_text = "\n".join(history_lines) if history_lines else "(none)"
 
+        # ===== Candidate actions =====
         candidates = "\n".join([f"{i + 1}. {cmd}" for i, cmd in enumerate(admissible_commands)])
-        task_example = TASK_FEW_SHOTS.get(task_type, "")
 
-        reflection_text = "(none)"
+        # ===== Reflexion (short + strong) =====
+        reflection_text = ""
         if self.use_reflexion and reflections:
-            reflection_text = "\n".join([f"- {item}" for item in reflections[-self.reflection_window :]])
-
-        format_rules = (
-            "Output format strictly:\n"
-            "Thought: <short reasoning>\n"
-            "Action: <one exact action from candidate actions>"
-        )
+            recent_reflections = reflections[-self.reflection_window :]
+            reflection_text = "Previous mistakes to avoid:\n"
+            for item in recent_reflections:
+                reflection_text += f"- {item}\n"
+            reflection_text += "\nAvoid repeating these mistakes.\n\n"
 
         return (
-            "You are an ALFWorld text-game agent. Choose the best next action to solve the task.\n"
-            "Act with explicit precondition-aware planning and choose only from candidate actions.\n\n"
-            f"Detected task type: {task_type}\n\n"
-            "Task taxonomy (6 tasks):\n"
-            "- pick_and_place_simple\n"
-            "- look_at_obj_in_light\n"
-            "- pick_clean_then_place_in_recep\n"
-            "- pick_heat_then_place_in_recep\n"
-            "- pick_cool_then_place_in_recep\n"
-            "- pick_two_obj_and_place\n\n"
-            f"Task-specific few-shot example:\n{task_example}\n\n"
+            "You are an ALFWorld decision-making agent.\n"
+            "Choose EXACTLY ONE valid action from the candidate list.\n\n"
+
             f"{PDDL_STYLE_GUIDE}\n\n"
-            "Subgoal transition rule:\n"
-            "- If a subgoal is completed, explicitly mark it in CompletedSubgoals and choose the next subgoal.\n"
-            "- After heating/cooling/cleaning an object, you must transition to placing it in the target receptacle.\n\n"
-            f"Previous mistakes:\n{reflection_text}\n\n"
+
+            "Before acting, check carefully:\n"
+            "- Am I at the correct location?\n"
+            "- Is the receptacle open if required?\n"
+            "- Am I holding the required object?\n"
+            "- If heating/cooling/cleaning is done, should I now place the object?\n\n"
+
+            f"{reflection_text}"
+
             f"Current observation:\n{observation}\n\n"
+
             f"Recent trajectory:\n{history_text}\n\n"
+
             f"Candidate actions:\n{candidates}\n\n"
-            f"{format_rules}"
+
+            "Output strictly in this format:\n"
+            "Thought: <very short reasoning>\n"
+            "Action: <one exact action from candidate list>"
         )
 
     def _choose_fallback(self, admissible_commands: Sequence[str]) -> str:
@@ -225,6 +256,7 @@ class LlamaActionPolicy:
         task_type: str,
         reflections: Sequence[str],
     ) -> Tuple[str, str]:
+
         prompt = self.build_prompt(
             observation,
             admissible_commands,
@@ -232,35 +264,72 @@ class LlamaActionPolicy:
             task_type,
             reflections,
         )
+
         messages = [
             {
                 "role": "system",
-                "content": "You are a precise decision-making ALFWorld agent using ReAct-style planning.",
+                "content": "You are a precise ALFWorld agent. Think briefly and output ONE valid action.",
             },
             {"role": "user", "content": prompt},
         ]
+
         model_inputs = self.tokenizer.apply_chat_template(
             messages,
             return_tensors="pt",
             add_generation_prompt=True,
             return_dict=True,
         )
+
         model_inputs = {k: v.to(self.model.device) for k, v in model_inputs.items()}
+
+        # 🔥 Deterministic decoding
         generated = self.model.generate(
             **model_inputs,
-            max_new_tokens=self.max_new_tokens,
+            max_new_tokens=min(self.max_new_tokens, 40),  # 제한
             do_sample=False,
+            temperature=0.0,
+            top_p=1.0,
             pad_token_id=self.tokenizer.pad_token_id,
             eos_token_id=self.tokenizer.eos_token_id,
         )
+
         prompt_len = model_inputs["input_ids"].shape[-1]
         new_tokens = generated[0][prompt_len:]
         raw_text = self.tokenizer.decode(new_tokens, skip_special_tokens=True).strip()
-        action = self._match_action(raw_text, admissible_commands)
-        if action not in admissible_commands:
-            action = self._choose_fallback(admissible_commands)
-        return action, raw_text
 
+        # 🔥 Action 라인 추출 강화
+        action_line = ""
+
+        if "Action:" in raw_text:
+            action_line = raw_text.split("Action:")[-1].strip()
+        else:
+            # 혹시 모델이 Action 없이 바로 action을 쓴 경우
+            action_line = raw_text.strip()
+
+        # 정규화
+        action_line = action_line.split("\n")[0].strip()
+        action_line = action_line.rstrip(".")
+        action_line = action_line.strip()
+
+        # 🔥 exact match 우선
+        matched_action = None
+        for cmd in admissible_commands:
+            if action_line == cmd:
+                matched_action = cmd
+                break
+
+        # 🔥 substring match 보완
+        if matched_action is None:
+            for cmd in admissible_commands:
+                if cmd in action_line:
+                    matched_action = cmd
+                    break
+
+        # 🔥 최종 fallback 최소화
+        if matched_action is None:
+            matched_action = self._choose_fallback(admissible_commands)
+
+        return matched_action, raw_text
 
 _POLICY_CACHE: Dict[PolicyConfig, LlamaActionPolicy] = {}
 

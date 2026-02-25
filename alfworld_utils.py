@@ -1,28 +1,11 @@
 import os
 import random
-import sys
 from pathlib import Path
 from typing import Dict
 
 import numpy as np
 import torch
 import yaml
-
-
-def apply_textworld_py313_compat() -> None:
-    """Patch TextWorld eval context handling for Python 3.13+."""
-    if sys.version_info < (3, 13):
-        return
-
-    from textworld.envs.pddl.textgen import EvalSymbol, TerminalSymbol
-
-    def _derive(self, context=None):
-        context = context or self.context
-        variables = context.get("variables", {})
-        value = eval(self.expression, {}, variables)
-        return [TerminalSymbol(value)]
-
-    EvalSymbol.derive = _derive
 
 
 def set_seed(seed: int) -> None:
@@ -65,7 +48,9 @@ def validate_config_paths(config: Dict) -> None:
         ("logic.domain", config["logic"]["domain"]),
         ("logic.grammar", config["logic"]["grammar"]),
     ]
+
     missing = [(name, path) for name, path in required_paths if not Path(path).exists()]
+
     if missing:
         details = "\n".join([f"- {name}: {path}" for name, path in missing])
         raise FileNotFoundError(

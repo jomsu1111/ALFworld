@@ -59,15 +59,42 @@ def _is_stuck_transition(action: str, next_observation: str, prev_observation: s
 
 
 def _build_reflection(action: str, observation: str, admissible: List[str]) -> str:
-    if "closed" in observation.lower():
-        return f"Action '{action}' failed due to closed receptacle. Prefer open-before-put/take when available."
-    if "not carrying" in observation.lower():
-        return f"Action '{action}' failed without inventory object. Prefer take before interact actions."
-    if "nothing happens" in observation.lower() or "cannot" in observation.lower() or "can't" in observation.lower():
-        return f"Action '{action}' caused no progress. Choose a different subgoal from admissible actions."
-    if "look" in [cmd.lower() for cmd in admissible]:
-        return f"Action '{action}' did not improve state. Use look/explore/open to reveal missing affordances."
-    return f"Action '{action}' did not improve progress. Avoid repeating it in same state."
+    obs = observation.lower()
+    action = action.lower()
+
+    # 1️⃣ Closed receptacle interaction
+    if "closed" in obs and ("put" in action or "take" in action):
+        return (
+            f"Action '{action}' failed because the receptacle was closed. "
+            "Open it before interacting."
+        )
+
+    # 2️⃣ Inventory failure
+    if "not carrying" in obs or "not holding" in obs:
+        return (
+            f"Action '{action}' failed because no object was held. "
+            "Take the required object first."
+        )
+
+    # 3️⃣ Nothing happens → likely wrong location
+    if "nothing happens" in obs:
+        return (
+            f"Action '{action}' caused no state change. "
+            "You may be at the wrong location or missing a precondition."
+        )
+
+    # 4️⃣ Cannot / can't
+    if "cannot" in obs or "can't" in obs:
+        return (
+            f"Action '{action}' is invalid in this state. "
+            "Check location, object possession, or receptacle state."
+        )
+
+    # 5️⃣ Default: avoid repetition
+    return (
+        f"Action '{action}' did not help progress. "
+        "Avoid repeating it in the same state."
+    )
 
 
 def _append_unique_reflection(reflections: List[str], text: str, max_len: int = 8) -> None:
@@ -85,24 +112,45 @@ def _rerank_loop_prone_action(
     repeated_action_streak: int,
     no_progress_steps: int,
 ) -> str:
-    low_value = {"inventory", "look", "examine"}
+
     norm_action = action.strip().lower()
-    if norm_action not in low_value:
+
+    # 🔥 substring 기반 low-value 판별
+    is_low_value = any(
+        keyword in norm_action
+        for keyword in ["inventory", "look", "examine"]
+    )
+
+    if not is_low_value:
         return action
 
+    # 🔥 loop 강도 높이면 더 빠르게 차단
     if repeated_action_streak < 2 and no_progress_steps < 2:
         return action
 
-    preferred = [
-        cmd for cmd in admissible
-        if cmd.strip().lower() not in low_value and cmd.strip().lower() != norm_action
-    ]
+    # 🔥 put/take/open/goto 우선
+    priority_keywords = ["take", "put", "open", "goto", "heat", "cool", "clean"]
+
+    preferred = []
+    for cmd in admissible:
+        cmd_lower = cmd.strip().lower()
+        if cmd_lower == norm_action:
+            continue
+        if any(k in cmd_lower for k in priority_keywords):
+            preferred.append(cmd)
+
     if preferred:
         return preferred[0]
 
-    alternatives = [cmd for cmd in admissible if cmd.strip().lower() != norm_action]
+    # fallback: 다른 아무 action
+    alternatives = [
+        cmd for cmd in admissible
+        if cmd.strip().lower() != norm_action
+    ]
+
     if alternatives:
         return alternatives[0]
+
     return action
 
 
@@ -119,6 +167,7 @@ def run_episodes(
     episodes: int,
     max_steps: int,
 ) -> Dict:
+
     results = []
     successes = 0
     total_score = 0.0
@@ -127,13 +176,14 @@ def run_episodes(
     for ep in range(episodes):
         obs, infos = env.reset()
         observation = obs[0]
-        task_type = _infer_task_type(infos, observation)
         done = False
         step_count = 0
         trajectory: List[Tuple[str, str]] = []
         reflections: List[str] = []
+
         last_score = 0.0
         won = False
+
         no_progress_steps = 0
         repeated_action_streak = 0
         stagnant_observation_streak = 0
@@ -141,19 +191,21 @@ def run_episodes(
 
         while not done and step_count < max_steps:
             admissible = list(infos["admissible_commands"][0])
-            action, _raw_model_output = policy.select_action(
+
+            action, _ = policy.select_action(
                 observation=observation,
                 admissible_commands=admissible,
                 trajectory=trajectory,
-                task_type=task_type,
                 reflections=reflections,
             )
+
             action = _rerank_loop_prone_action(
                 action=action,
                 admissible=admissible,
                 repeated_action_streak=repeated_action_streak,
                 no_progress_steps=no_progress_steps,
             )
+
             prev_observation = observation
             prev_score = last_score
 
@@ -162,51 +214,65 @@ def run_episodes(
             done = bool(dones[0])
             last_score = float(scores[0])
             won = bool(infos.get("won", [False])[0]) or won
+
             trajectory.append((action, next_observation))
 
-            if action == prev_action:
-                repeated_action_streak += 1
-            else:
-                repeated_action_streak = 1
+            # ===== Loop tracking =====
+            repeated_action_streak = (
+                repeated_action_streak + 1 if action == prev_action else 1
+            )
             prev_action = action
 
-            if next_observation.strip() == prev_observation.strip():
-                stagnant_observation_streak += 1
-            else:
-                stagnant_observation_streak = 0
+            stagnant_observation_streak = (
+                stagnant_observation_streak + 1
+                if next_observation.strip() == prev_observation.strip()
+                else 0
+            )
 
-            progressed = bool(last_score > prev_score or won)
+            # ===== Progress 판단 완화 =====
+            progressed = (
+                last_score > prev_score
+                or won
+                or next_observation != prev_observation
+            )
+
             if progressed:
                 no_progress_steps = 0
             else:
                 no_progress_steps += 1
 
+            # ===== Minimal Reflexion =====
             if repeated_action_streak >= 3 or stagnant_observation_streak >= 3:
                 reflection = (
-                    "Immediate reflection: loop detected (same action or unchanged observation >= 3). "
-                    "Switch subgoal and avoid repeated look/examine."
+                    "Loop detected. Avoid repeating the same action."
                 )
                 _append_unique_reflection(reflections, reflection)
                 repeated_action_streak = 0
                 stagnant_observation_streak = 0
 
-            if no_progress_steps >= 5:
+            elif no_progress_steps >= 5:
                 reflection = (
-                    f"Mid-episode reflection: no progress for {no_progress_steps} steps. "
-                    "Mark completed subgoals explicitly, pick next subgoal, then execute a different admissible action."
+                    "No progress for several steps. Switch to a different admissible action."
                 )
                 _append_unique_reflection(reflections, reflection)
                 no_progress_steps = 0
 
-            if last_score <= prev_score and _is_stuck_transition(action, next_observation, prev_observation):
-                _append_unique_reflection(reflections, _build_reflection(action, next_observation, admissible))
+            # ===== Stuck transition reflection (간단화) =====
+            elif last_score <= prev_score and _is_stuck_transition(
+                action, next_observation, prev_observation
+            ):
+                _append_unique_reflection(
+                    reflections,
+                    _build_reflection(action, next_observation, admissible),
+                )
 
             observation = next_observation
             step_count += 1
 
             print(
-                f"[episode {ep + 1:03d} step {step_count:02d}] task={task_type} action={action!r} "
-                f"score={last_score:.3f} done={done} won={won}"
+                f"[episode {ep + 1:03d} step {step_count:02d}] "
+                f"action={action!r} score={last_score:.3f} "
+                f"done={done} won={won}"
             )
 
         success = bool(won or last_score >= 1.0)
@@ -214,19 +280,20 @@ def run_episodes(
         total_score += last_score
         total_steps += step_count
 
-        rec = {
-            "episode": ep + 1,
-            "task_type": task_type,
-            "success": success,
-            "won": bool(won),
-            "score": float(last_score),
-            "steps": int(step_count),
-            "reflections": reflections,
-        }
-        results.append(rec)
+        results.append(
+            {
+                "episode": ep + 1,
+                "success": success,
+                "won": bool(won),
+                "score": float(last_score),
+                "steps": int(step_count),
+                "reflections": reflections,
+            }
+        )
+
         print(
-            f"[episode {ep + 1:03d} done] task={task_type} success={success} "
-            f"score={last_score:.3f} steps={step_count}"
+            f"[episode {ep + 1:03d} done] "
+            f"success={success} score={last_score:.3f} steps={step_count}"
         )
 
     return {
