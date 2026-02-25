@@ -157,6 +157,7 @@ class LlamaActionPolicy:
         observation: str,
         admissible_commands: Sequence[str],
         trajectory: Sequence[Tuple[str, str]],
+        task_type: str,
         reflections: Sequence[str],
     ) -> str:
 
@@ -180,11 +181,25 @@ class LlamaActionPolicy:
                 reflection_text += f"- {item}\n"
             reflection_text += "\nAvoid repeating these mistakes.\n\n"
 
+        goal_text = "unknown"
+        goal_match = re.search(
+            r"your task is to:\s*(.+?)(?:[.\n]|$)",
+            observation,
+            flags=re.IGNORECASE,
+        )
+        if goal_match:
+            goal_text = goal_match.group(1).strip()
+
+        task_few_shot = TASK_FEW_SHOTS.get(task_type, TASK_FEW_SHOTS["pick_and_place_simple"])
+
         return (
             "You are an ALFWorld decision-making agent.\n"
             "Choose EXACTLY ONE valid action from the candidate list.\n\n"
 
             f"{PDDL_STYLE_GUIDE}\n\n"
+
+            f"Task type: {task_type}\n"
+            f"Task-specific example:\n{task_few_shot}\n\n"
 
             "Before acting, check carefully:\n"
             "- Am I at the correct location?\n"
@@ -195,13 +210,15 @@ class LlamaActionPolicy:
             f"{reflection_text}"
 
             f"Current observation:\n{observation}\n\n"
+            f"Your goal is: {goal_text}\n"
+            "Progress check: Did the last action move you closer to the goal? (yes/no)\n"
+            "If no, choose a different action type than the previous one.\n\n"
 
             f"Recent trajectory:\n{history_text}\n\n"
 
             f"Candidate actions:\n{candidates}\n\n"
 
             "Output strictly in this format:\n"
-            "Thought: <very short reasoning>\n"
             "Action: <one exact action from candidate list>"
         )
 
@@ -253,8 +270,8 @@ class LlamaActionPolicy:
         observation: str,
         admissible_commands: Sequence[str],
         trajectory: Sequence[Tuple[str, str]],
-        task_type: str,
-        reflections: Sequence[str],
+        task_type: str = "pick_and_place_simple",
+        reflections: Sequence[str] = (),
     ) -> Tuple[str, str]:
 
         prompt = self.build_prompt(

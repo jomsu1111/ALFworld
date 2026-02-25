@@ -128,8 +128,8 @@ def _rerank_loop_prone_action(
     if repeated_action_streak < 2 and no_progress_steps < 2:
         return action
 
-    # 🔥 put/take/open/goto 우선
-    priority_keywords = ["take", "put", "open", "goto", "heat", "cool", "clean"]
+    # 🔥 put/take/open/go to 우선
+    priority_keywords = ["take", "put", "open", "go to", "heat", "cool", "clean"]
 
     preferred = []
     for cmd in admissible:
@@ -176,6 +176,7 @@ def run_episodes(
     for ep in range(episodes):
         obs, infos = env.reset()
         observation = obs[0]
+        task_type = _infer_task_type(infos, observation)
         done = False
         step_count = 0
         trajectory: List[Tuple[str, str]] = []
@@ -188,14 +189,59 @@ def run_episodes(
         repeated_action_streak = 0
         stagnant_observation_streak = 0
         prev_action = ""
+        goal_match = re.search(
+            r"your task is to:\s*put\s+(.+?)\s+in\s+(.+?)(?:[.\n]|$)",
+            observation,
+            flags=re.IGNORECASE,
+        )
+        goal_object = None
+        goal_receptacle = None
+        if goal_match:
+            goal_object = re.sub(
+                r"^(a|an|the)\s+",
+                "",
+                goal_match.group(1).strip(),
+                flags=re.IGNORECASE,
+            )
+            goal_receptacle = goal_match.group(2).strip()
+
+        holding_object = None
+        stage = "find"
 
         while not done and step_count < max_steps:
             admissible = list(infos["admissible_commands"][0])
+            if holding_object is not None:
+                blocked_keywords = ("look", "examine", "inventory")
+                admissible = [
+                    cmd for cmd in admissible
+                    if not any(keyword in cmd.lower() for keyword in blocked_keywords)
+                ]
+
+            # Stage constraint
+            if stage == "goto_target":
+                constrained = [
+                    cmd for cmd in admissible
+                    if (
+                        (goal_receptacle and goal_receptacle.lower() in cmd.lower())
+                        or cmd.lower().startswith("go to")
+                        or cmd.lower().startswith("open")
+                    )
+                ]
+                if constrained:
+                    admissible = constrained
+            elif stage == "place":
+                constrained = [
+                    cmd for cmd in admissible
+                    if cmd.lower().startswith("put") or cmd.lower().startswith("open")
+                ]
+                if constrained:
+                    admissible = constrained
 
             action, _ = policy.select_action(
                 observation=observation,
                 admissible_commands=admissible,
                 trajectory=trajectory,
+                task_type=task_type,
                 reflections=reflections,
             )
 
@@ -215,7 +261,44 @@ def run_episodes(
             last_score = float(scores[0])
             won = bool(infos.get("won", [False])[0]) or won
 
+            # Regeneration logic
+            if (
+                next_observation == prev_observation
+                and last_score <= prev_score
+                and not done
+            ):
+                admissible = [
+                    cmd for cmd in admissible
+                    if cmd.strip().lower() != action.strip().lower()
+                ]
+                if admissible:
+                    action, _ = policy.select_action(
+                        observation=observation,
+                        admissible_commands=admissible,
+                        trajectory=trajectory,
+                        task_type=task_type,
+                        reflections=reflections,
+                    )
+                    obs, scores, dones, infos = env.step([action])
+                    next_observation = obs[0]
+                    done = bool(dones[0])
+                    last_score = float(scores[0])
+                    won = bool(infos.get("won", [False])[0]) or won
+
             trajectory.append((action, next_observation))
+            if action.startswith("take "):
+                holding_object = goal_object
+                stage = "goto_target"
+            elif action.startswith("put "):
+                holding_object = None
+                stage = "done"
+            if (
+                holding_object is not None
+                and action.lower().startswith("go to")
+                and goal_receptacle
+                and goal_receptacle.lower() in action.lower()
+            ):
+                stage = "place"
 
             # ===== Loop tracking =====
             repeated_action_streak = (

@@ -7,7 +7,6 @@ from pathlib import Path
 
 import torch
 from alfworld_utils import (
-    apply_textworld_py313_compat,
     load_config,
     set_seed,
     validate_config_paths,
@@ -43,7 +42,6 @@ def parse_args() -> argparse.Namespace:
 
 
 def main() -> None:
-    apply_textworld_py313_compat()
     args = parse_args()
     set_seed(args.seed)
 
