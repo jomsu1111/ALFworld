@@ -1,0 +1,143 @@
+{
+  "timestamp": "2026-02-25T05:27:14.645962",
+  "model_id": "meta-llama/Meta-Llama-3-8B-Instruct",
+  "split": "eval_id",
+  "episodes": 10,
+  "max_steps": 60,
+  "prompting_mode": "react",
+  "use_reflexion": true,
+  "reflection_window": 4,
+  "success_rate": 0.0,
+  "avg_score": 0.0,
+  "avg_steps": 59.8,
+  "results": [
+    {
+      "episode": 1,
+      "success": false,
+      "won": false,
+      "score": 0.0,
+      "steps": 58,
+      "reflections": [
+        "Action 'go to drawer 1' did not help progress. Avoid repeating it in the same state.",
+        "Action 'go to drawer 8' did not help progress. Avoid repeating it in the same state.",
+        "Action 'go to drawer 2' did not help progress. Avoid repeating it in the same state."
+      ]
+    },
+    {
+      "episode": 2,
+      "success": false,
+      "won": false,
+      "score": 0.0,
+      "steps": 60,
+      "reflections": [
+        "Action 'go to cabinet 12' did not help progress. Avoid repeating it in the same state.",
+        "Action 'go to cabinet 9' did not help progress. Avoid repeating it in the same state.",
+        "Action 'go to cabinet 8' did not help progress. Avoid repeating it in the same state.",
+        "Action 'go to cabinet 10' did not help progress. Avoid repeating it in the same state.",
+        "Action 'go to microwave 1' did not help progress. Avoid repeating it in the same state.",
+        "Action 'go to cabinet 9' did not help progress. Avoid repeating it in the same state."
+      ]
+    },
+    {
+      "episode": 3,
+      "success": false,
+      "won": false,
+      "score": 0.0,
+      "steps": 60,
+      "reflections": [
+        "Action 'go to cabinet 1' did not help progress. Avoid repeating it in the same state."
+      ]
+    },
+    {
+      "episode": 4,
+      "success": false,
+      "won": false,
+      "score": 0.0,
+      "steps": 60,
+      "reflections": []
+    },
+    {
+      "episode": 5,
+      "success": false,
+      "won": false,
+      "score": 0.0,
+      "steps": 60,
+      "reflections": [
+        "Action 'go to cabinet 9' did not help progress. Avoid repeating it in the same state.",
+        "Action 'go to cabinet 1' did not help progress. Avoid repeating it in the same state.",
+        "Action 'go to cabinet 10' did not help progress. Avoid repeating it in the same state.",
+        "Action 'go to cabinet 1' did not help progress. Avoid repeating it in the same state.",
+        "Action 'go to cabinet 10' did not help progress. Avoid repeating it in the same state.",
+        "Action 'go to cabinet 1' did not help progress. Avoid repeating it in the same state.",
+        "Action 'go to cabinet 10' did not help progress. Avoid repeating it in the same state.",
+        "Action 'go to cabinet 2' did not help progress. Avoid repeating it in the same state."
+      ]
+    },
+    {
+      "episode": 6,
+      "success": false,
+      "won": false,
+      "score": 0.0,
+      "steps": 60,
+      "reflections": [
+        "Action 'go to cabinet 21' did not help progress. Avoid repeating it in the same state.",
+        "Action 'go to cabinet 1' did not help progress. Avoid repeating it in the same state.",
+        "Action 'go to cabinet 21' did not help progress. Avoid repeating it in the same state.",
+        "Action 'go to cabinet 2' did not help progress. Avoid repeating it in the same state.",
+        "Action 'go to cabinet 1' did not help progress. Avoid repeating it in the same state.",
+        "Action 'go to cabinet 21' did not help progress. Avoid repeating it in the same state.",
+        "Action 'go to cabinet 2' did not help progress. Avoid repeating it in the same state.",
+        "Action 'go to cabinet 27' did not help progress. Avoid repeating it in the same state."
+      ]
+    },
+    {
+      "episode": 7,
+      "success": false,
+      "won": false,
+      "score": 0.0,
+      "steps": 60,
+      "reflections": [
+        "Action 'go to cabinet 3' did not help progress. Avoid repeating it in the same state.",
+        "Action 'go to cabinet 13' did not help progress. Avoid repeating it in the same state.",
+        "Action 'go to cabinet 3' did not help progress. Avoid repeating it in the same state.",
+        "Action 'go to cabinet 13' did not help progress. Avoid repeating it in the same state.",
+        "Action 'go to cabinet 3' did not help progress. Avoid repeating it in the same state.",
+        "Action 'go to cabinet 13' did not help progress. Avoid repeating it in the same state.",
+        "Action 'go to cabinet 12' did not help progress. Avoid repeating it in the same state.",
+        "Action 'go to cabinet 21' did not help progress. Avoid repeating it in the same state."
+      ]
+    },
+    {
+      "episode": 8,
+      "success": false,
+      "won": false,
+      "score": 0.0,
+      "steps": 60,
+      "reflections": [
+        "Action 'go to cabinet 1' did not help progress. Avoid repeating it in the same state."
+      ]
+    },
+    {
+      "episode": 9,
+      "success": false,
+      "won": false,
+      "score": 0.0,
+      "steps": 60,
+      "reflections": [
+        "Action 'go to cabinet 1' did not help progress. Avoid repeating it in the same state."
+      ]
+    },
+    {
+      "episode": 10,
+      "success": false,
+      "won": false,
+      "score": 0.0,
+      "steps": 60,
+      "reflections": [
+        "Action 'go to microwave 1' did not help progress. Avoid repeating it in the same state.",
+        "Action 'go to cabinet 1' did not help progress. Avoid repeating it in the same state.",
+        "Action 'go to microwave 1' did not help progress. Avoid repeating it in the same state."
+      ]
+    }
+  ]
+}

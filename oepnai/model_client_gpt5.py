@@ -3,9 +3,6 @@ import re
 from dataclasses import dataclass
 from typing import Dict, Sequence, Tuple
 
-import torch
-from transformers import AutoModelForCausalLM, AutoTokenizer, BitsAndBytesConfig
-
 
 def _normalize_action(text: str) -> str:
     return re.sub(r"\s+", " ", text.strip().lower())
@@ -30,7 +27,7 @@ REACT_FEW_SHOTS = (
     "Action: take candle 1 from countertop 1\n"
     "Observation: You are holding candle 1.\n"
     "Thought: I am now holding the goal object. Since the goal receptacle is bathtubbasin 1, "
-    "the next useful action is to go to bathtubbasin 1.\n"
+    "the next required subgoal is to go to bathtubbasin 1.\n"
     "Action: go to bathtubbasin 1\n"
     "Observation: You are near bathtubbasin 1.\n"
     "Thought: I am at the target receptacle while holding the goal object, so placing it here directly completes the goal.\n"
@@ -43,7 +40,7 @@ REACT_FEW_SHOTS = (
     "Action: take soup 1 from countertop 1\n"
     "Observation: You are holding soup 1. microwave 1 is closed.\n"
     "Thought: The goal needs the soup heated, but microwave 1 is closed. "
-    "So opening microwave 1 is the right next action before heating.\n"
+    "The immediate subgoal is to open microwave 1 so heating can be executed.\n"
     "Action: open microwave 1\n"
     "Observation: microwave 1 is open.\n"
     "Thought: Now the heating precondition is satisfied. I should heat soup 1 first, then later move to diningtable 1 and place it.\n"
@@ -79,9 +76,7 @@ PDDL_STYLE_GUIDE = (
 @dataclass(frozen=True)
 class PolicyConfig:
     model_id: str
-    hf_token: str
-    device_map: str
-    load_in_4bit: bool
+    api_key: str
     temperature: float
     top_p: float
     max_new_tokens: int
@@ -91,8 +86,9 @@ class PolicyConfig:
     reflection_window: int
 
 
-class LlamaActionPolicy:
+class GPT5ActionPolicy:
     def __init__(self, cfg: PolicyConfig) -> None:
+        self.model_id = cfg.model_id
         self.temperature = cfg.temperature
         self.top_p = cfg.top_p
         self.max_new_tokens = cfg.max_new_tokens
@@ -100,29 +96,15 @@ class LlamaActionPolicy:
         self.prompting_mode = cfg.prompting_mode
         self.use_reflexion = cfg.use_reflexion
         self.reflection_window = cfg.reflection_window
-
-        quantization_config = None
-        torch_dtype = torch.bfloat16 if torch.cuda.is_available() else torch.float32
-        if cfg.load_in_4bit:
-            quantization_config = BitsAndBytesConfig(
-                load_in_4bit=True,
-                bnb_4bit_quant_type="nf4",
-                bnb_4bit_use_double_quant=True,
-                bnb_4bit_compute_dtype=torch.bfloat16 if torch.cuda.is_available() else torch.float32,
-            )
-
-        self.tokenizer = AutoTokenizer.from_pretrained(cfg.model_id, token=cfg.hf_token)
-        if self.tokenizer.pad_token is None:
-            self.tokenizer.pad_token = self.tokenizer.eos_token
-
-        self.model = AutoModelForCausalLM.from_pretrained(
-            cfg.model_id,
-            token=cfg.hf_token,
-            torch_dtype=torch_dtype,
-            device_map=cfg.device_map,
-            quantization_config=quantization_config,
-        )
-        self.model.eval()
+        try:
+            from openai import OpenAI
+        except Exception as e:  # pragma: no cover
+            raise RuntimeError(
+                "openai package is required. Install with: pip install openai"
+            ) from e
+        self.client = OpenAI(api_key=cfg.api_key)
+        self.last_inferred_subgoal = ""
+        self.step_index = 0
 
     def build_prompt(
         self,
@@ -132,8 +114,6 @@ class LlamaActionPolicy:
         task_type: str,
         reflections: Sequence[str],
     ) -> str:
-
-        # ===== Recent trajectory =====
         history_slice = trajectory[-self.history_window :]
         history_lines = []
         for idx, (action, obs_text) in enumerate(history_slice, 1):
@@ -141,10 +121,8 @@ class LlamaActionPolicy:
             history_lines.append(f"   observation={obs_text}")
         history_text = "\n".join(history_lines) if history_lines else "(none)"
 
-        # ===== Candidate actions =====
         candidates = "\n".join([f"{i + 1}. {cmd}" for i, cmd in enumerate(admissible_commands)])
 
-        # ===== Reflexion (short + strong) =====
         reflection_text = ""
         if self.use_reflexion and reflections:
             recent_reflections = reflections[-self.reflection_window :]
@@ -169,17 +147,16 @@ class LlamaActionPolicy:
         )
         if subgoal_match:
             subgoal_text = subgoal_match.group(1).strip()
+        step_no = self.step_index + 1
+        last_subgoal = self.last_inferred_subgoal if self.last_inferred_subgoal else "(none)"
 
         return (
             "You are an ALFWorld decision-making agent.\n"
             "Use ReAct style: Observation -> Thought -> Action.\n"
             "Choose EXACTLY ONE valid action from the candidate list.\n\n"
-
             f"{PDDL_STYLE_GUIDE}\n\n"
-
             f"Task type: {task_type}\n"
             f"{REACT_FEW_SHOTS}\n"
-
             "Before acting, check carefully:\n"
             "- Am I at the correct location?\n"
             "- Is the receptacle open if required?\n"
@@ -188,22 +165,28 @@ class LlamaActionPolicy:
             "Thought quality rule:\n"
             "- Mention what you observed.\n"
             "- Mention the current subgoal.\n"
-            "- State why the next action is helpful toward the goal.\n\n"
-
+            "- State the immediate subgoal and why this action advances it.\n\n"
+            "Per-step decision rule:\n"
+            "- At every step, restate the task you are solving.\n"
+            "- Infer ONE immediate subgoal for this step.\n"
+            "- Choose ONE action that directly advances that subgoal.\n\n"
+            "Step record:\n"
+            f"- Step: {step_no}\n"
+            f"- Task type: {task_type}\n"
+            f"- Goal: {goal_text}\n"
+            f"- Current subgoal hint: {subgoal_text}\n"
+            f"- Last inferred subgoal: {last_subgoal}\n\n"
             f"{reflection_text}"
-
             f"Current observation:\n{observation}\n\n"
             f"Your goal is: {goal_text}\n"
             f"Current subgoal is: {subgoal_text}\n"
             "Progress check: Did the last action move you closer to the goal? (yes/no)\n"
             "If no, choose a different action type than the previous one.\n\n"
-
             f"Recent trajectory:\n{history_text}\n\n"
-
             f"Candidate actions:\n{candidates}\n\n"
-
             "Output strictly in this format:\n"
-            "Thought: <observation + goal + next-action reasoning>\n"
+            "Subgoal: <one immediate subgoal for this step>\n"
+            "Thought: <observation + goal + immediate subgoal reasoning>\n"
             "Action: <one exact action from candidate list>"
         )
 
@@ -214,8 +197,6 @@ class LlamaActionPolicy:
         return admissible_commands[0]
 
     def _extract_action_candidate(self, raw_text: str) -> str:
-        # BeliefUpdate 블록의 "Inventory:"를 액션으로 오인하지 않도록
-        # Action/Answer 라인만 우선적으로 추출한다.
         action_lines = re.findall(
             r"(?:^|\n)\s*(?:action|answer)\s*:\s*(.+)",
             raw_text,
@@ -223,7 +204,6 @@ class LlamaActionPolicy:
         )
         if action_lines:
             return action_lines[-1].strip().strip('"').strip("'")
-
         lines = [line.strip() for line in raw_text.splitlines() if line.strip()]
         if not lines:
             return ""
@@ -242,11 +222,29 @@ class LlamaActionPolicy:
             return lines[0][:200]
         return "(no thought)"
 
+    def _extract_subgoal(self, raw_text: str) -> str:
+        subgoal_lines = re.findall(
+            r"(?:^|\n)\s*subgoal\s*:\s*(.+)",
+            raw_text,
+            flags=re.IGNORECASE,
+        )
+        if subgoal_lines:
+            return subgoal_lines[-1].strip().strip('"').strip("'")
+
+        heuristic = re.search(
+            r"(?:immediate|next)\s+subgoal\s+(?:is|:)\s*(.+?)(?:[.\n]|$)",
+            raw_text,
+            flags=re.IGNORECASE,
+        )
+        if heuristic:
+            return heuristic.group(1).strip().strip('"').strip("'")
+        return ""
+
     def _match_action(self, raw_text: str, admissible_commands: Sequence[str]) -> str:
         cleaned = self._extract_action_candidate(raw_text)
         normalized_map = {_normalize_action(c): c for c in admissible_commands}
-
         norm = _normalize_action(cleaned)
+
         if norm in normalized_map:
             return normalized_map[norm]
 
@@ -262,7 +260,20 @@ class LlamaActionPolicy:
 
         return self._choose_fallback(admissible_commands)
 
-    @torch.no_grad()
+    def _chat(self, prompt: str) -> str:
+        completion = self.client.chat.completions.create(
+            model=self.model_id,
+            messages=[
+                {
+                    "role": "system",
+                    "content": "You are a precise ALFWorld agent. Think briefly and output ONE valid action.",
+                },
+                {"role": "user", "content": prompt},
+            ],
+            max_completion_tokens=self.max_new_tokens,
+        )
+        return (completion.choices[0].message.content or "").strip()
+
     def select_action(
         self,
         observation: str,
@@ -271,7 +282,6 @@ class LlamaActionPolicy:
         task_type: str = "pick_and_place_simple",
         reflections: Sequence[str] = (),
     ) -> Tuple[str, str]:
-
         prompt = self.build_prompt(
             observation,
             admissible_commands,
@@ -279,51 +289,21 @@ class LlamaActionPolicy:
             task_type,
             reflections,
         )
-
-        messages = [
-            {
-                "role": "system",
-                "content": "You are a precise ALFWorld agent. Think briefly and output ONE valid action.",
-            },
-            {"role": "user", "content": prompt},
-        ]
-
-        model_inputs = self.tokenizer.apply_chat_template(
-            messages,
-            return_tensors="pt",
-            add_generation_prompt=True,
-            return_dict=True,
-        )
-
-        model_inputs = {k: v.to(self.model.device) for k, v in model_inputs.items()}
-
-        # 🔥 Deterministic decoding
-        generated = self.model.generate(
-            **model_inputs,
-            max_new_tokens=self.max_new_tokens,
-            do_sample=False,
-            pad_token_id=self.tokenizer.pad_token_id,
-            eos_token_id=self.tokenizer.eos_token_id,
-        )
-
-        prompt_len = model_inputs["input_ids"].shape[-1]
-        new_tokens = generated[0][prompt_len:]
-        raw_text = self.tokenizer.decode(new_tokens, skip_special_tokens=True).strip()
-
+        raw_text = self._chat(prompt)
+        self.last_inferred_subgoal = self._extract_subgoal(raw_text)
+        self.step_index += 1
         thought = self._extract_thought(raw_text)
         matched_action = self._match_action(raw_text, admissible_commands)
-
         return matched_action, thought
 
-_POLICY_CACHE: Dict[PolicyConfig, LlamaActionPolicy] = {}
+
+_POLICY_CACHE: Dict[PolicyConfig, GPT5ActionPolicy] = {}
 
 
-def get_llama_action_policy(
+def get_gpt5_action_policy(
     *,
     model_id: str,
-    hf_token: str,
-    device_map: str,
-    load_in_4bit: bool,
+    api_key: str,
     temperature: float,
     top_p: float,
     max_new_tokens: int,
@@ -332,12 +312,10 @@ def get_llama_action_policy(
     use_reflexion: bool = True,
     reflection_window: int = 4,
     reuse: bool = True,
-) -> LlamaActionPolicy:
+) -> GPT5ActionPolicy:
     cfg = PolicyConfig(
         model_id=model_id,
-        hf_token=hf_token,
-        device_map=device_map,
-        load_in_4bit=load_in_4bit,
+        api_key=api_key,
         temperature=temperature,
         top_p=top_p,
         max_new_tokens=max_new_tokens,
@@ -349,7 +327,7 @@ def get_llama_action_policy(
     if reuse and cfg in _POLICY_CACHE:
         return _POLICY_CACHE[cfg]
 
-    policy = LlamaActionPolicy(cfg)
+    policy = GPT5ActionPolicy(cfg)
     if reuse:
         _POLICY_CACHE[cfg] = policy
     return policy
