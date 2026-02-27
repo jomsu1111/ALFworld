@@ -16,7 +16,7 @@ from model_client import get_llama_action_policy
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="ALFWorld ReAct+Reflexion runner with Llama-3-8B.")
+    parser = argparse.ArgumentParser(description="ALFWorld ReAct few-shot runner with Llama-3-8B.")
     parser.add_argument("--config", default="configs/alfworld_llama3_zeroshot.yaml")
     parser.add_argument("--split", choices=["eval_id", "eval_ood"], default="eval_id")
     parser.add_argument("--episodes", type=int, default=20)
@@ -33,10 +33,6 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--max-new-tokens", type=int, default=64)
     parser.add_argument("--history-window", type=int, default=8)
     parser.add_argument("--prompting-mode", choices=["react", "direct"], default="react")
-    parser.add_argument("--use-reflexion", dest="use_reflexion", action="store_true")
-    parser.add_argument("--no-reflexion", dest="use_reflexion", action="store_false")
-    parser.set_defaults(use_reflexion=True)
-    parser.add_argument("--reflection-window", type=int, default=4)
     parser.add_argument("--output-dir", default="outputs")
     return parser.parse_args()
 
@@ -69,8 +65,6 @@ def main() -> None:
         max_new_tokens=args.max_new_tokens,
         history_window=args.history_window,
         prompting_mode=args.prompting_mode,
-        use_reflexion=args.use_reflexion,
-        reflection_window=args.reflection_window,
         reuse=True,
     )
     run_stats = run_episodes(
@@ -87,8 +81,6 @@ def main() -> None:
         "episodes": args.episodes,
         "max_steps": args.max_steps,
         "prompting_mode": args.prompting_mode,
-        "use_reflexion": args.use_reflexion,
-        "reflection_window": args.reflection_window,
         "success_rate": run_stats["successes"] / max(args.episodes, 1),
         "avg_score": run_stats["total_score"] / max(args.episodes, 1),
         "avg_steps": run_stats["total_steps"] / max(args.episodes, 1),
@@ -99,13 +91,13 @@ def main() -> None:
     output_dir.mkdir(parents=True, exist_ok=True)
     out_path = output_dir / (
         f"alfworld_{args.split}_{args.model_id.split('/')[-1]}_"
-        f"{args.prompting_mode}_{'reflexion' if args.use_reflexion else 'noreflexion'}_"
+        f"{args.prompting_mode}_fewshot_"
         f"{dt.datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
     )
     with open(out_path, "w", encoding="utf-8") as f:
         json.dump(summary, f, indent=2)
 
-    print("\n===== ReAct/Reflexion summary =====")
+    print("\n===== ReAct few-shot summary =====")
     print(json.dumps(summary, indent=2))
     print(f"\nSaved summary to: {out_path}")
 
