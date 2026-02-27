@@ -333,7 +333,7 @@ class LlamaActionPolicy:
 
         return (
             "You are an ALFWorld decision-making agent.\n"
-            "Follow the few-shot style exactly.\n"
+            "Follow the few-shot style.\n"
             "Keep reasoning concise and output one next action.\n\n"
 
             f"Task type: {task_type}\n"
