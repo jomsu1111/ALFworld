@@ -18,18 +18,18 @@ from oepnai.model_client_gpt5 import get_gpt5_action_policy
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="ALFWorld ReAct+Reflexion runner with GPT-5 API.")
+    parser = argparse.ArgumentParser(description="ALFWorld ReAct+Reflexion runner with GPT-5-mini API.")
     parser.add_argument("--config", default="configs/alfworld_llama3_zeroshot.yaml")
     parser.add_argument("--split", choices=["eval_id", "eval_ood"], default="eval_id")
     parser.add_argument("--episodes", type=int, default=20)
     parser.add_argument("--max-steps", type=int, default=50)
     parser.add_argument("--seed", type=int, default=42)
-    parser.add_argument("--model-id", default="gpt-5")
+    parser.add_argument("--model-id", default="gpt-5-mini")
     parser.add_argument("--openai-api-key", default=None, help="OpenAI API key. If omitted, uses OPENAI_API_KEY env.")
     parser.add_argument("--temperature", type=float, default=0.2)
     parser.add_argument("--top-p", type=float, default=1.0)
     parser.add_argument("--max-new-tokens", type=int, default=64)
-    parser.add_argument("--history-window", type=int, default=8)
+    parser.add_argument("--history-window", type=int, default=12)
     parser.add_argument("--prompting-mode", choices=["react", "direct"], default="react")
     parser.add_argument("--use-reflexion", dest="use_reflexion", action="store_true")
     parser.add_argument("--no-reflexion", dest="use_reflexion", action="store_false")

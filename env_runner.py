@@ -1,10 +1,21 @@
 import re
-from typing import Dict, List, Tuple
+from typing import Dict, List, Protocol, Tuple
 
 from alfworld.agents.environment import get_environment
 
 from alfworld_utils import map_split_name
-from model_client import LlamaActionPolicy
+
+
+class ActionPolicy(Protocol):
+    def select_action(
+        self,
+        observation: str,
+        admissible_commands,
+        trajectory,
+        task_type: str = "pick_and_place_simple",
+        goal_text: str | None = None,
+    ) -> Tuple[str, str]:
+        ...
 
 
 def _infer_task_type(infos: Dict, observation: str) -> str:
@@ -49,7 +60,7 @@ def build_env(config: Dict, split: str):
 def run_episodes(
     *,
     env,
-    policy: LlamaActionPolicy,
+    policy: ActionPolicy,
     episodes: int,
     max_steps: int,
 ) -> Dict:
@@ -86,6 +97,7 @@ def run_episodes(
                 admissible_commands=admissible,
                 trajectory=trajectory,
                 task_type=task_type,
+                goal_text=episode_goal_text,
             )
 
             obs, scores, dones, infos = env.step([action])

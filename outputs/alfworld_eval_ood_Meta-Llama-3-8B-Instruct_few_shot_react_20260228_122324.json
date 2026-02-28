@@ -1,0 +1,84 @@
+{
+  "timestamp": "2026-02-28T12:23:24.213485",
+  "model_id": "meta-llama/Meta-Llama-3-8B-Instruct",
+  "split": "eval_ood",
+  "episodes": 10,
+  "max_steps": 50,
+  "method": "few_shot_react",
+  "scoring_samples": 5,
+  "success_rate": 0.2,
+  "avg_score": 0.2,
+  "avg_steps": 44.3,
+  "results": [
+    {
+      "episode": 1,
+      "success": true,
+      "won": true,
+      "score": 1.0,
+      "steps": 10
+    },
+    {
+      "episode": 2,
+      "success": true,
+      "won": true,
+      "score": 1.0,
+      "steps": 33
+    },
+    {
+      "episode": 3,
+      "success": false,
+      "won": false,
+      "score": 0.0,
+      "steps": 50
+    },
+    {
+      "episode": 4,
+      "success": false,
+      "won": false,
+      "score": 0.0,
+      "steps": 50
+    },
+    {
+      "episode": 5,
+      "success": false,
+      "won": false,
+      "score": 0.0,
+      "steps": 50
+    },
+    {
+      "episode": 6,
+      "success": false,
+      "won": false,
+      "score": 0.0,
+      "steps": 50
+    },
+    {
+      "episode": 7,
+      "success": false,
+      "won": false,
+      "score": 0.0,
+      "steps": 50
+    },
+    {
+      "episode": 8,
+      "success": false,
+      "won": false,
+      "score": 0.0,
+      "steps": 50
+    },
+    {
+      "episode": 9,
+      "success": false,
+      "won": false,
+      "score": 0.0,
+      "steps": 50
+    },
+    {
+      "episode": 10,
+      "success": false,
+      "won": false,
+      "score": 0.0,
+      "steps": 50
+    }
+  ]
+}

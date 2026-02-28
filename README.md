@@ -44,7 +44,7 @@ python run_alfworld_llama3_zeroshot.py \
   --split eval_id \
   --episodes 20 \
   --max-steps 50 \
-  --prompting-mode react
+  --method few_shot_react
 ```
 
 주요 인자:
@@ -58,6 +58,14 @@ python run_alfworld_llama3_zeroshot.py \
 - `--load-in-4bit / --no-load-in-4bit`: 4bit 양자화 사용 여부
 - `--temperature`, `--top-p`, `--max-new-tokens`
 - `--history-window`: 프롬프트 state summary 생성 시 참고할 최근 trajectory 길이
+- `--method`: 실험 방법 선택
+  - `zero_shot`
+  - `few_shot`
+  - `few_shot_react`
+  - `few_shot_reflexion`
+  - `few_shot_react_reflexion`
+  - `few_shot_react_scoring`
+- `--scoring-samples`: `few_shot_react_scoring`에서 후보 샘플 수
 - `--output-dir`: 결과 JSON 저장 디렉토리
 
 ## 5) 정책 개요

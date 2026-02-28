@@ -1,0 +1,952 @@
+{
+  "timestamp": "2026-02-28T09:39:23.496545",
+  "model_id": "meta-llama/Meta-Llama-3-8B-Instruct",
+  "split": "eval_ood",
+  "episodes": 134,
+  "max_steps": 50,
+  "method": "few_shot_react",
+  "scoring_samples": 5,
+  "success_rate": 0.1417910447761194,
+  "avg_score": 0.1417910447761194,
+  "avg_steps": 45.40298507462686,
+  "results": [
+    {
+      "episode": 1,
+      "success": false,
+      "won": false,
+      "score": 0.0,
+      "steps": 50
+    },
+    {
+      "episode": 2,
+      "success": false,
+      "won": false,
+      "score": 0.0,
+      "steps": 50
+    },
+    {
+      "episode": 3,
+      "success": false,
+      "won": false,
+      "score": 0.0,
+      "steps": 50
+    },
+    {
+      "episode": 4,
+      "success": false,
+      "won": false,
+      "score": 0.0,
+      "steps": 50
+    },
+    {
+      "episode": 5,
+      "success": false,
+      "won": false,
+      "score": 0.0,
+      "steps": 50
+    },
+    {
+      "episode": 6,
+      "success": true,
+      "won": true,
+      "score": 1.0,
+      "steps": 41
+    },
+    {
+      "episode": 7,
+      "success": false,
+      "won": false,
+      "score": 0.0,
+      "steps": 50
+    },
+    {
+      "episode": 8,
+      "success": false,
+      "won": false,
+      "score": 0.0,
+      "steps": 50
+    },
+    {
+      "episode": 9,
+      "success": false,
+      "won": false,
+      "score": 0.0,
+      "steps": 50
+    },
+    {
+      "episode": 10,
+      "success": false,
+      "won": false,
+      "score": 0.0,
+      "steps": 50
+    },
+    {
+      "episode": 11,
+      "success": false,
+      "won": false,
+      "score": 0.0,
+      "steps": 50
+    },
+    {
+      "episode": 12,
+      "success": false,
+      "won": false,
+      "score": 0.0,
+      "steps": 50
+    },
+    {
+      "episode": 13,
+      "success": false,
+      "won": false,
+      "score": 0.0,
+      "steps": 50
+    },
+    {
+      "episode": 14,
+      "success": true,
+      "won": true,
+      "score": 1.0,
+      "steps": 4
+    },
+    {
+      "episode": 15,
+      "success": false,
+      "won": false,
+      "score": 0.0,
+      "steps": 50
+    },
+    {
+      "episode": 16,
+      "success": true,
+      "won": true,
+      "score": 1.0,
+      "steps": 8
+    },
+    {
+      "episode": 17,
+      "success": true,
+      "won": true,
+      "score": 1.0,
+      "steps": 9
+    },
+    {
+      "episode": 18,
+      "success": false,
+      "won": false,
+      "score": 0.0,
+      "steps": 50
+    },
+    {
+      "episode": 19,
+      "success": false,
+      "won": false,
+      "score": 0.0,
+      "steps": 50
+    },
+    {
+      "episode": 20,
+      "success": false,
+      "won": false,
+      "score": 0.0,
+      "steps": 50
+    },
+    {
+      "episode": 21,
+      "success": false,
+      "won": false,
+      "score": 0.0,
+      "steps": 50
+    },
+    {
+      "episode": 22,
+      "success": false,
+      "won": false,
+      "score": 0.0,
+      "steps": 50
+    },
+    {
+      "episode": 23,
+      "success": false,
+      "won": false,
+      "score": 0.0,
+      "steps": 50
+    },
+    {
+      "episode": 24,
+      "success": false,
+      "won": false,
+      "score": 0.0,
+      "steps": 50
+    },
+    {
+      "episode": 25,
+      "success": false,
+      "won": false,
+      "score": 0.0,
+      "steps": 50
+    },
+    {
+      "episode": 26,
+      "success": false,
+      "won": false,
+      "score": 0.0,
+      "steps": 50
+    },
+    {
+      "episode": 27,
+      "success": false,
+      "won": false,
+      "score": 0.0,
+      "steps": 50
+    },
+    {
+      "episode": 28,
+      "success": false,
+      "won": false,
+      "score": 0.0,
+      "steps": 50
+    },
+    {
+      "episode": 29,
+      "success": false,
+      "won": false,
+      "score": 0.0,
+      "steps": 50
+    },
+    {
+      "episode": 30,
+      "success": true,
+      "won": true,
+      "score": 1.0,
+      "steps": 14
+    },
+    {
+      "episode": 31,
+      "success": false,
+      "won": false,
+      "score": 0.0,
+      "steps": 50
+    },
+    {
+      "episode": 32,
+      "success": false,
+      "won": false,
+      "score": 0.0,
+      "steps": 50
+    },
+    {
+      "episode": 33,
+      "success": false,
+      "won": false,
+      "score": 0.0,
+      "steps": 50
+    },
+    {
+      "episode": 34,
+      "success": true,
+      "won": true,
+      "score": 1.0,
+      "steps": 16
+    },
+    {
+      "episode": 35,
+      "success": false,
+      "won": false,
+      "score": 0.0,
+      "steps": 50
+    },
+    {
+      "episode": 36,
+      "success": false,
+      "won": false,
+      "score": 0.0,
+      "steps": 50
+    },
+    {
+      "episode": 37,
+      "success": false,
+      "won": false,
+      "score": 0.0,
+      "steps": 50
+    },
+    {
+      "episode": 38,
+      "success": false,
+      "won": false,
+      "score": 0.0,
+      "steps": 50
+    },
+    {
+      "episode": 39,
+      "success": false,
+      "won": false,
+      "score": 0.0,
+      "steps": 50
+    },
+    {
+      "episode": 40,
+      "success": true,
+      "won": true,
+      "score": 1.0,
+      "steps": 5
+    },
+    {
+      "episode": 41,
+      "success": false,
+      "won": false,
+      "score": 0.0,
+      "steps": 50
+    },
+    {
+      "episode": 42,
+      "success": false,
+      "won": false,
+      "score": 0.0,
+      "steps": 50
+    },
+    {
+      "episode": 43,
+      "success": false,
+      "won": false,
+      "score": 0.0,
+      "steps": 50
+    },
+    {
+      "episode": 44,
+      "success": false,
+      "won": false,
+      "score": 0.0,
+      "steps": 50
+    },
+    {
+      "episode": 45,
+      "success": false,
+      "won": false,
+      "score": 0.0,
+      "steps": 50
+    },
+    {
+      "episode": 46,
+      "success": false,
+      "won": false,
+      "score": 0.0,
+      "steps": 50
+    },
+    {
+      "episode": 47,
+      "success": false,
+      "won": false,
+      "score": 0.0,
+      "steps": 50
+    },
+    {
+      "episode": 48,
+      "success": false,
+      "won": false,
+      "score": 0.0,
+      "steps": 50
+    },
+    {
+      "episode": 49,
+      "success": false,
+      "won": false,
+      "score": 0.0,
+      "steps": 50
+    },
+    {
+      "episode": 50,
+      "success": true,
+      "won": true,
+      "score": 1.0,
+      "steps": 18
+    },
+    {
+      "episode": 51,
+      "success": false,
+      "won": false,
+      "score": 0.0,
+      "steps": 50
+    },
+    {
+      "episode": 52,
+      "success": false,
+      "won": false,
+      "score": 0.0,
+      "steps": 50
+    },
+    {
+      "episode": 53,
+      "success": false,
+      "won": false,
+      "score": 0.0,
+      "steps": 50
+    },
+    {
+      "episode": 54,
+      "success": true,
+      "won": true,
+      "score": 1.0,
+      "steps": 29
+    },
+    {
+      "episode": 55,
+      "success": true,
+      "won": true,
+      "score": 1.0,
+      "steps": 43
+    },
+    {
+      "episode": 56,
+      "success": false,
+      "won": false,
+      "score": 0.0,
+      "steps": 50
+    },
+    {
+      "episode": 57,
+      "success": false,
+      "won": false,
+      "score": 0.0,
+      "steps": 50
+    },
+    {
+      "episode": 58,
+      "success": true,
+      "won": true,
+      "score": 1.0,
+      "steps": 5
+    },
+    {
+      "episode": 59,
+      "success": false,
+      "won": false,
+      "score": 0.0,
+      "steps": 50
+    },
+    {
+      "episode": 60,
+      "success": false,
+      "won": false,
+      "score": 0.0,
+      "steps": 50
+    },
+    {
+      "episode": 61,
+      "success": false,
+      "won": false,
+      "score": 0.0,
+      "steps": 50
+    },
+    {
+      "episode": 62,
+      "success": false,
+      "won": false,
+      "score": 0.0,
+      "steps": 50
+    },
+    {
+      "episode": 63,
+      "success": false,
+      "won": false,
+      "score": 0.0,
+      "steps": 50
+    },
+    {
+      "episode": 64,
+      "success": false,
+      "won": false,
+      "score": 0.0,
+      "steps": 50
+    },
+    {
+      "episode": 65,
+      "success": true,
+      "won": true,
+      "score": 1.0,
+      "steps": 22
+    },
+    {
+      "episode": 66,
+      "success": false,
+      "won": false,
+      "score": 0.0,
+      "steps": 50
+    },
+    {
+      "episode": 67,
+      "success": false,
+      "won": false,
+      "score": 0.0,
+      "steps": 50
+    },
+    {
+      "episode": 68,
+      "success": false,
+      "won": false,
+      "score": 0.0,
+      "steps": 50
+    },
+    {
+      "episode": 69,
+      "success": false,
+      "won": false,
+      "score": 0.0,
+      "steps": 50
+    },
+    {
+      "episode": 70,
+      "success": false,
+      "won": false,
+      "score": 0.0,
+      "steps": 50
+    },
+    {
+      "episode": 71,
+      "success": false,
+      "won": false,
+      "score": 0.0,
+      "steps": 50
+    },
+    {
+      "episode": 72,
+      "success": false,
+      "won": false,
+      "score": 0.0,
+      "steps": 50
+    },
+    {
+      "episode": 73,
+      "success": false,
+      "won": false,
+      "score": 0.0,
+      "steps": 50
+    },
+    {
+      "episode": 74,
+      "success": false,
+      "won": false,
+      "score": 0.0,
+      "steps": 50
+    },
+    {
+      "episode": 75,
+      "success": false,
+      "won": false,
+      "score": 0.0,
+      "steps": 50
+    },
+    {
+      "episode": 76,
+      "success": false,
+      "won": false,
+      "score": 0.0,
+      "steps": 50
+    },
+    {
+      "episode": 77,
+      "success": false,
+      "won": false,
+      "score": 0.0,
+      "steps": 50
+    },
+    {
+      "episode": 78,
+      "success": false,
+      "won": false,
+      "score": 0.0,
+      "steps": 50
+    },
+    {
+      "episode": 79,
+      "success": true,
+      "won": true,
+      "score": 1.0,
+      "steps": 43
+    },
+    {
+      "episode": 80,
+      "success": false,
+      "won": false,
+      "score": 0.0,
+      "steps": 50
+    },
+    {
+      "episode": 81,
+      "success": true,
+      "won": true,
+      "score": 1.0,
+      "steps": 6
+    },
+    {
+      "episode": 82,
+      "success": false,
+      "won": false,
+      "score": 0.0,
+      "steps": 50
+    },
+    {
+      "episode": 83,
+      "success": true,
+      "won": true,
+      "score": 1.0,
+      "steps": 11
+    },
+    {
+      "episode": 84,
+      "success": false,
+      "won": false,
+      "score": 0.0,
+      "steps": 50
+    },
+    {
+      "episode": 85,
+      "success": false,
+      "won": false,
+      "score": 0.0,
+      "steps": 50
+    },
+    {
+      "episode": 86,
+      "success": false,
+      "won": false,
+      "score": 0.0,
+      "steps": 50
+    },
+    {
+      "episode": 87,
+      "success": false,
+      "won": false,
+      "score": 0.0,
+      "steps": 50
+    },
+    {
+      "episode": 88,
+      "success": false,
+      "won": false,
+      "score": 0.0,
+      "steps": 50
+    },
+    {
+      "episode": 89,
+      "success": false,
+      "won": false,
+      "score": 0.0,
+      "steps": 50
+    },
+    {
+      "episode": 90,
+      "success": false,
+      "won": false,
+      "score": 0.0,
+      "steps": 50
+    },
+    {
+      "episode": 91,
+      "success": true,
+      "won": true,
+      "score": 1.0,
+      "steps": 24
+    },
+    {
+      "episode": 92,
+      "success": false,
+      "won": false,
+      "score": 0.0,
+      "steps": 50
+    },
+    {
+      "episode": 93,
+      "success": false,
+      "won": false,
+      "score": 0.0,
+      "steps": 50
+    },
+    {
+      "episode": 94,
+      "success": true,
+      "won": true,
+      "score": 1.0,
+      "steps": 9
+    },
+    {
+      "episode": 95,
+      "success": false,
+      "won": false,
+      "score": 0.0,
+      "steps": 50
+    },
+    {
+      "episode": 96,
+      "success": false,
+      "won": false,
+      "score": 0.0,
+      "steps": 50
+    },
+    {
+      "episode": 97,
+      "success": false,
+      "won": false,
+      "score": 0.0,
+      "steps": 50
+    },
+    {
+      "episode": 98,
+      "success": false,
+      "won": false,
+      "score": 0.0,
+      "steps": 50
+    },
+    {
+      "episode": 99,
+      "success": false,
+      "won": false,
+      "score": 0.0,
+      "steps": 50
+    },
+    {
+      "episode": 100,
+      "success": false,
+      "won": false,
+      "score": 0.0,
+      "steps": 50
+    },
+    {
+      "episode": 101,
+      "success": false,
+      "won": false,
+      "score": 0.0,
+      "steps": 50
+    },
+    {
+      "episode": 102,
+      "success": false,
+      "won": false,
+      "score": 0.0,
+      "steps": 50
+    },
+    {
+      "episode": 103,
+      "success": false,
+      "won": false,
+      "score": 0.0,
+      "steps": 50
+    },
+    {
+      "episode": 104,
+      "success": false,
+      "won": false,
+      "score": 0.0,
+      "steps": 50
+    },
+    {
+      "episode": 105,
+      "success": false,
+      "won": false,
+      "score": 0.0,
+      "steps": 50
+    },
+    {
+      "episode": 106,
+      "success": false,
+      "won": false,
+      "score": 0.0,
+      "steps": 50
+    },
+    {
+      "episode": 107,
+      "success": false,
+      "won": false,
+      "score": 0.0,
+      "steps": 50
+    },
+    {
+      "episode": 108,
+      "success": false,
+      "won": false,
+      "score": 0.0,
+      "steps": 50
+    },
+    {
+      "episode": 109,
+      "success": false,
+      "won": false,
+      "score": 0.0,
+      "steps": 50
+    },
+    {
+      "episode": 110,
+      "success": true,
+      "won": true,
+      "score": 1.0,
+      "steps": 22
+    },
+    {
+      "episode": 111,
+      "success": false,
+      "won": false,
+      "score": 0.0,
+      "steps": 50
+    },
+    {
+      "episode": 112,
+      "success": false,
+      "won": false,
+      "score": 0.0,
+      "steps": 50
+    },
+    {
+      "episode": 113,
+      "success": false,
+      "won": false,
+      "score": 0.0,
+      "steps": 50
+    },
+    {
+      "episode": 114,
+      "success": false,
+      "won": false,
+      "score": 0.0,
+      "steps": 50
+    },
+    {
+      "episode": 115,
+      "success": false,
+      "won": false,
+      "score": 0.0,
+      "steps": 50
+    },
+    {
+      "episode": 116,
+      "success": false,
+      "won": false,
+      "score": 0.0,
+      "steps": 50
+    },
+    {
+      "episode": 117,
+      "success": false,
+      "won": false,
+      "score": 0.0,
+      "steps": 50
+    },
+    {
+      "episode": 118,
+      "success": false,
+      "won": false,
+      "score": 0.0,
+      "steps": 50
+    },
+    {
+      "episode": 119,
+      "success": false,
+      "won": false,
+      "score": 0.0,
+      "steps": 50
+    },
+    {
+      "episode": 120,
+      "success": false,
+      "won": false,
+      "score": 0.0,
+      "steps": 50
+    },
+    {
+      "episode": 121,
+      "success": false,
+      "won": false,
+      "score": 0.0,
+      "steps": 50
+    },
+    {
+      "episode": 122,
+      "success": false,
+      "won": false,
+      "score": 0.0,
+      "steps": 50
+    },
+    {
+      "episode": 123,
+      "success": false,
+      "won": false,
+      "score": 0.0,
+      "steps": 50
+    },
+    {
+      "episode": 124,
+      "success": true,
+      "won": true,
+      "score": 1.0,
+      "steps": 5
+    },
+    {
+      "episode": 125,
+      "success": false,
+      "won": false,
+      "score": 0.0,
+      "steps": 50
+    },
+    {
+      "episode": 126,
+      "success": false,
+      "won": false,
+      "score": 0.0,
+      "steps": 50
+    },
+    {
+      "episode": 127,
+      "success": false,
+      "won": false,
+      "score": 0.0,
+      "steps": 50
+    },
+    {
+      "episode": 128,
+      "success": false,
+      "won": false,
+      "score": 0.0,
+      "steps": 50
+    },
+    {
+      "episode": 129,
+      "success": false,
+      "won": false,
+      "score": 0.0,
+      "steps": 50
+    },
+    {
+      "episode": 130,
+      "success": false,
+      "won": false,
+      "score": 0.0,
+      "steps": 50
+    },
+    {
+      "episode": 131,
+      "success": false,
+      "won": false,
+      "score": 0.0,
+      "steps": 50
+    },
+    {
+      "episode": 132,
+      "success": false,
+      "won": false,
+      "score": 0.0,
+      "steps": 50
+    },
+    {
+      "episode": 133,
+      "success": false,
+      "won": false,
+      "score": 0.0,
+      "steps": 50
+    },
+    {
+      "episode": 134,
+      "success": false,
+      "won": false,
+      "score": 0.0,
+      "steps": 50
+    }
+  ]
+}

@@ -1,4 +1,3 @@
-import difflib
 import re
 from dataclasses import dataclass
 from typing import Dict, Sequence, Tuple
@@ -11,6 +10,40 @@ def _normalize_action(text: str) -> str:
     return re.sub(r"\s+", " ", text.strip().lower())
 
 
+def _extract_goal_entities(goal_text: str) -> Tuple[str, str]:
+    goal = goal_text.lower().strip()
+
+    look_match = re.search(
+        r"look at (?:a|an|the)?\s*(?P<obj>[a-z0-9_]+)\s+under (?:the\s+)?(?P<recep>[a-z0-9_]+)",
+        goal,
+    )
+    if look_match:
+        return look_match.group("obj"), look_match.group("recep")
+
+    examine_match = re.search(
+        r"examine (?:a|an|the)?\s*(?P<obj>[a-z0-9_]+)\s+with (?:the\s+)?(?P<recep>[a-z0-9_]+)",
+        goal,
+    )
+    if examine_match:
+        return examine_match.group("obj"), examine_match.group("recep")
+
+    transform_match = re.search(
+        r"(?:heat|cool|clean)\s+(?:some|a|an)?\s*(?P<obj>[a-z0-9_]+)\s+and put it\s+(?:in|on)\s+(?:the\s+)?(?P<recep>[a-z0-9_]+)",
+        goal,
+    )
+    if transform_match:
+        return transform_match.group("obj"), transform_match.group("recep")
+
+    put_match = re.search(
+        r"put (?:some|a|an|the|two)?\s*(?:(?:hot|cool|clean)\s+)?(?P<obj>[a-z0-9_]+)\s+(?:in|on)\s+(?:the\s+)?(?P<recep>[a-z0-9_]+)",
+        goal,
+    )
+    if put_match:
+        return put_match.group("obj"), put_match.group("recep")
+
+    return "unknown", "unknown"
+
+
 TASK_TYPES: Tuple[str, ...] = (
     "pick_and_place_simple",
     "look_at_obj_in_light",
@@ -20,217 +53,240 @@ TASK_TYPES: Tuple[str, ...] = (
     "pick_two_obj_and_place",
 )
 
+MANDATORY_STEP_ORDER = {
+    "pick_and_place_simple": (
+        "Find target object",
+        "Take target object",
+        "Place target object in/on target receptacle",
+    ),
+    "pick_clean_then_place_in_recep": (
+        "Find target object",
+        "Take target object",
+        "Clean target object with sinkbasin",
+        "Place target object in/on target receptacle",
+    ),
+    "pick_heat_then_place_in_recep": (
+        "Find target object",
+        "Take target object",
+        "Heat target object with microwave",
+        "Place target object in/on target receptacle",
+    ),
+    "pick_cool_then_place_in_recep": (
+        "Find target object",
+        "Take target object",
+        "Cool target object with fridge",
+        "Place target object in/on target receptacle",
+    ),
+    "pick_two_obj_and_place": (
+        "Find first target object",
+        "Take first target object",
+        "Place first target object in/on target receptacle",
+        "Find second target object",
+        "Take second target object",
+        "Place second target object in/on target receptacle",
+    ),
+    "look_at_obj_in_light": (
+        "Find target object",
+        "Take target object",
+        "Use target light source",
+        "Look while holding target object",
+    ),
+}
+
+
+def _contains_target_put(action: str, target_obj: str, target_recep: str) -> bool:
+    action_l = action.strip().lower()
+    if not action_l.startswith("put "):
+        return False
+    if target_obj != "unknown" and target_obj not in action_l:
+        return False
+    if target_recep != "unknown":
+        return f"in/on {target_recep}" in action_l
+    return True
+
+
+def _is_stage_done(
+    stage: str,
+    trajectory: Sequence[Tuple[str, str]],
+    target_obj: str,
+    target_recep: str,
+) -> bool:
+    for action, _ in trajectory:
+        action_l = action.strip().lower()
+
+        if stage == "Find target object":
+            if target_obj == "unknown":
+                if action_l.startswith(("go to ", "open ", "examine ")):
+                    return True
+            elif target_obj in action_l:
+                return True
+
+        elif stage == "Take target object":
+            if action_l.startswith("take ") and (target_obj == "unknown" or target_obj in action_l):
+                return True
+
+        elif stage == "Clean target object with sinkbasin":
+            if action_l.startswith("clean ") and (target_obj == "unknown" or target_obj in action_l):
+                return True
+
+        elif stage == "Heat target object with microwave":
+            if action_l.startswith("heat ") and (target_obj == "unknown" or target_obj in action_l):
+                return True
+
+        elif stage == "Cool target object with fridge":
+            if action_l.startswith("cool ") and (target_obj == "unknown" or target_obj in action_l):
+                return True
+
+        elif stage == "Place target object in/on target receptacle":
+            if _contains_target_put(action_l, target_obj, target_recep):
+                return True
+
+        elif stage == "Use target light source":
+            if action_l.startswith("use ") and (target_recep == "unknown" or target_recep in action_l):
+                return True
+
+        elif stage == "Look while holding target object":
+            if action_l == "look":
+                return True
+
+        elif stage == "Find first target object":
+            if target_obj == "unknown":
+                if action_l.startswith(("go to ", "open ", "examine ")):
+                    return True
+            elif target_obj in action_l:
+                return True
+
+        elif stage == "Take first target object":
+            if action_l.startswith("take ") and (target_obj == "unknown" or target_obj in action_l):
+                return True
+
+        elif stage == "Place first target object in/on target receptacle":
+            if _contains_target_put(action_l, target_obj, target_recep):
+                return True
+
+        elif stage == "Find second target object":
+            if target_obj == "unknown":
+                if action_l.startswith(("go to ", "open ", "examine ")):
+                    return True
+            elif target_obj in action_l:
+                return True
+
+        elif stage == "Take second target object":
+            # Second object taken after first placement.
+            if action_l.startswith("take ") and (target_obj == "unknown" or target_obj in action_l):
+                first_placed = any(
+                    _contains_target_put(prev_action, target_obj, target_recep)
+                    for prev_action, _ in trajectory
+                )
+                if first_placed:
+                    return True
+
+        elif stage == "Place second target object in/on target receptacle":
+            put_count = 0
+            for prev_action, _ in trajectory:
+                if _contains_target_put(prev_action, target_obj, target_recep):
+                    put_count += 1
+                    if put_count >= 2:
+                        return True
+
+    return False
+
+
+def _next_required_stage(
+    task_type: str,
+    trajectory: Sequence[Tuple[str, str]],
+    target_obj: str,
+    target_recep: str,
+) -> str:
+    order = MANDATORY_STEP_ORDER.get(task_type, MANDATORY_STEP_ORDER["pick_and_place_simple"])
+    for stage in order:
+        if not _is_stage_done(stage, trajectory, target_obj, target_recep):
+            return stage
+    return "All mandatory steps are complete; finish with the most goal-consistent admissible action."
+
 
 REACT_FEW_SHOTS_BY_TASK = {
     "pick_and_place_simple": (
-        """react_put_0:
-You are in the middle of a room. Looking quickly around you, you see a cabinet 4, a cabinet 3, a cabinet 2, a cabinet 1, a countertop 1, a garbagecan 1, a handtowelholder 2, a handtowelholder 1, a sinkbasin 2, a sinkbasin 1, a toilet 1, a toiletpaperhanger 1, and a towelholder 1.
+        """react_put_short:
 Your task is to: put some spraybottle on toilet.
-> think: To solve the task, I need to find and take a sparybottle, then put it on toilet.
-OK.
-> think: First I need to find a spraybottle. A spraybottle is more likely to appear in cabinet (1-4), countertop (1), toilet (1), sinkbasin (1-2), garbagecan (1). I can check one by one, starting with cabinet 1.
-OK.
+> think: Find target object, take it, then place it at goal receptacle.
 > go to cabinet 1
-On the cabinet 1, you see a cloth 1, a soapbar 1, a soapbottle 1.
+> open cabinet 1
 > go to cabinet 2
-The cabinet 2 is closed.
 > open cabinet 2
-You open the cabinet 2. The cabinet 2 is open. In it, you see a candle 1, and a spraybottle 2.
-> think: Now I find a spraybottle (2). Next, I need to take it.
-> take spraybottle 2 from cabinet 2
-You pick up the spraybottle 2 from the cabinet 2.
-> think: Now I take a spraybottle (2). Next, I need to put it in/on toilet 1.
-OK.
+> take spraybottle 1 from cabinet 2
 > go to toilet 1
-On the toilet 1, you see a soapbottle 2.
-> put spraybottle 2 in/on toilet 1
-You put the spraybottle 2 in/on the toilet 1.
+> put spraybottle 1 in/on toilet 1
 """
     ),
     "pick_clean_then_place_in_recep": (
-        """react_clean_0:
-You are in the middle of a room. Looking quickly around you, you see a cabinet 13, a cabinet 12, a cabinet 11, a cabinet 10, a cabinet 9, a cabinet 8, a cabinet 7, a cabinet 6, a cabinet 5, a cabinet 4, a cabinet 3, a cabinet 2, a cabinet 1, a coffeemachine 1, a countertop 1, a diningtable 1, a drawer 1, a fridge 1, a garbagecan 1, a microwave 1, a shelf 3, a shelf 2, a shelf 1, a sinkbasin 1, a stoveburner 4, a stoveburner 3, a stoveburner 2, a stoveburner 1, and a toaster 1.
+        """react_clean_short:
 Your task is to: put a clean lettuce in diningtable.
-> think: To solve the task, I need to find and take a lettuce, then clean it with sinkbasin, then put it in diningtable. 
-OK.
-> think: First I need to find a lettuce. A lettuce is more likely to appear in fridge (1), diningtable (1), sinkbasin (1), stoveburner (1-3), cabinet (1-13). I can check one by one, starting with fridge 1.
-OK.
+> think: Find object -> take -> clean -> place.
 > go to fridge 1
-The fridge 1 is closed.
 > open fridge 1
-You open the fridge 1. The fridge 1 is open. In it, you see a cup 3, a egg 2, a potato 3, and a potato 2.
 > go to diningtable 1
-On the diningtable 1, you see a apple 1, a bread 1, a butterknife 2, a cup 2, a fork 2, a knife 2, a knife 1, a ladle 1, a lettuce 1, a mug 2, a mug 1, a pan 2, a peppershaker 1, a spatula 3, a tomato 2, and a tomato 1.
-> think: Now I find a lettuce (1). Next, I need to take it.
-OK.
 > take lettuce 1 from diningtable 1
-You pick up the lettuce 1 from the diningtable 1.
-> think: Now I take a lettuce (1). Next, I need to go to sinkbasin (1) and clean it.
-OK.
 > go to sinkbasin 1
-On the sinkbasin 1, you see a apple 2, a ladle 2, a spoon 1, and a tomato 3.
 > clean lettuce 1 with sinkbasin 1
-You clean the lettuce 1 using the sinkbasin 1.
-> think: Now I clean a lettuce (1). Next, I need to put it in/on diningtable 1.
-OK.
 > go to diningtable 1
-On the diningtable 1, you see a apple 1, a bread 1, a butterknife 2, a cup 2, a fork 2, a knife 2, a knife 1, a ladle 1, a mug 2, a mug 1, a pan 2, a peppershaker 1, a spatula 3, a tomato 2, and a tomato 1.
 > put lettuce 1 in/on diningtable 1
-You put the lettuce 1 in/on the diningtable 1.
 """
     ),
     "pick_heat_then_place_in_recep": (
-        """react_heat_0:
-You are in the middle of a room. Looking quickly around you, you see a cabinet 10, a cabinet 9, a cabinet 8, a cabinet 7, a cabinet 6, a cabinet 5, a cabinet 4, a cabinet 3, a cabinet 2, a cabinet 1, a coffeemachine 1, a countertop 3, a countertop 2, a countertop 1, a diningtable 1, a drawer 6, a drawer 5, a drawer 4, a drawer 3, a drawer 2, a drawer 1, a fridge 1, a garbagecan 1, a microwave 1, a sinkbasin 1, a stoveburner 4, a stoveburner 3, a stoveburner 2, a stoveburner 1, and a toaster 1.
+        """react_heat_short:
 Your task is to: heat some egg and put it in diningtable.
-> think: To solve the task, I need to find and take an egg, then heat it with microwave, then put it in diningtable.
-OK.
-> think: First I need to find an egg. An egg is more likely to appear in fridge (1), countertop (1-3), diningtable (1), stoveburner (1-4), toaster (1), garbagecan (1), cabinet (1-10). I can check one by one, starting with fridge 1.
-OK.
+> think: Find object -> take -> heat -> place.
+> go to fridge 1
 > open fridge 1
-You open the fridge 1. The fridge 1 is open. In it, you see a lettuce 2, a mug 2, and a potato 3.
-> go to countertop 1
-On the countertop 1, you see a bread 1, a fork 1, and a saltshaker 1.
-> go to countertop 2
-On the countertop 2, you see nothing.
 > go to countertop 3
-On the countertop 3, you see a bowl 1, a butterknife 1, a egg 2, a kettle 2, a plate 1, a sink 1, and a spatula 2.
-> think: Now I find an egg (2). Next, I need to take it.
-OK.
 > take egg 2 from countertop 3
-You pick up the egg 2 from the countertop 3.
-> think: Now I take an egg (2). Next, I need go to a microwave (1) and heat it.
-OK.
 > go to microwave 1
-The microwave 1 is closed.
 > heat egg 2 with microwave 1
-You heat the egg 2 using the microwave 1.
-> think: Now I heat an egg (2). Next, I need to put it in/on diningtable 1.
-OK.
 > go to diningtable 1
-On the diningtable 1, you see a apple 2, a bread 3, a egg 1, a kettle 1, a knife 1, a mug 1, a papertowelroll 1, a peppershaker 2, a potato 1, a soapbottle 1, and a spatula 1.
 > put egg 2 in/on diningtable 1
-You put the egg 2 in/on the diningtable 1.
 """
     ),
     "pick_cool_then_place_in_recep": (
-        """react_cool_0:
-You are in the middle of a room. Looking quickly around you, you see a cabinet 16, a cabinet 15, a cabinet 14, a cabinet 13, a cabinet 12, a cabinet 11, a cabinet 10, a cabinet 9, a cabinet 8, a cabinet 7, a cabinet 6, a cabinet 5, a cabinet 4, a cabinet 3, a cabinet 2, a cabinet 1, a coffeemachine 1, a countertop 2, a countertop 1, a diningtable 1, a drawer 5, a drawer 4, a drawer 3, a drawer 2, a drawer 1, a fridge 1, a garbagecan 1, a microwave 1, a safe 1, a sinkbasin 1, a stoveburner 4, a stoveburner 3, a stoveburner 2, a stoveburner 1, and a toaster 1.
+        """react_cool_short:
 Your task is to: cool some pan and put it in stoveburner.
-> think: To solve the task, I need to find and take a pan, then cool it with fridge, then put it in stoveburner.
-OK.
-> think: First I need to find a pan. An pan is more likely to appear in stoveburner (1-4), sinkbasin (1), diningtable (1), countertop (1-2), cabinet (1-16), drawer (1-5). I can check one by one, starting with stoveburner 1.
-OK.
->go to stoveburner 1
-On the stoveburner 1, you see nothing.
->go to stoveburner 2
-On the stoveburner 2, you see a pot 1.
+> think: Find object -> take -> cool -> place.
+> go to stoveburner 1
+> go to stoveburner 2
 > go to stoveburner 3
-On the stoveburner 3, you see a pan 1.
 > take pan 1 from stoveburner 3
-> think: Now I find a pan (1). Next, I need to take it.
-OK.
-You pick up the pan 1 from the stoveburner 3.
-> think: Now I take a pan (1). Next, I need to go to a fridge (1) and cool it.
-OK.
 > go to fridge 1
-The fridge 1 is closed.
 > cool pan 1 with fridge 1
-You cool the pan 1 using the fridge 1.
-> think: Now I cool a pan (1). Next, I need to put it in/on stoveburner 1.
-OK.
->go to stoveburner 1
-On the stoveburner 1, you see nothing.
+> go to stoveburner 1
 > put pan 1 in/on stoveburner 1
-You put the pan 1 in/on the stoveburner 1.
 """
     ),
     "pick_two_obj_and_place": (
-        """react_puttwo_0:
-You are in the middle of a room. Looking quickly around you, you see a armchair 2, a armchair 1, a bed 1, a countertop 1, a diningtable 1, a drawer 2, a drawer 1, a dresser 1, a garbagecan 1, a laundryhamper 1, and a sidetable 1.
+        """react_puttwo_short:
 Your task is to: put two creditcard in dresser.
-> think: To solve the task, I need to find and take the first creditcard, then put it in dresser, then find and take the second creditcard, then put it in dresser.
-OK.
-> think: First I need to find the first creditcard. A creditcard is more likely to appear in drawer (1-2), coutertop (1), sidetable (1), diningtable (1), armchair (1-2), bed (1). I can check one by one, starting with drawer 1.
-OK.
+> think: find first object -> take -> place -> find second object -> take -> place.
 > go to drawer 1
-The drawer 1 is closed.
 > open drawer 1
-You open the drawer 1. The drawer 1 is open. In it, you see a book 1, a cd 1, and a pen 1.
-> go to drawer 2
-The drawer 2 is closed.
-> open drawer 2
-You open the drawer 2. The drawer 2 is open. In it, you see nothing.
 > go to countertop 1
-On the countertop 1, you see a cellphone 2, a creditcard 4, a creditcard 3, a creditcard 2, a mirror 1, a pencil 2, and a pencil 1.
-> think: Now I find the first creditcard (2). Next, I need to take it. I can find the second creditcard (3) later in countertop 1.
-OK.
 > take creditcard 2 from countertop 1
-You pick up the creditcard 2 from the countertop 1.
-> think: Now I take the first creditcard (2). Next, I need to put it in/on dresser 1.
-OK.
 > go to dresser 1
-On the dresser 1, you see a mug 1, and a television 1.
 > put creditcard 2 in/on dresser 1
-You put the creditcard 2 in/on the dresser 1.
-> think: Now I put the first creditcard in dresser. Next, I need to find the second creditcard. I can directly go to countertop 1.
-OK.
 > go to countertop 1
-On the countertop 1, you see a cellphone 2, a creditcard 4, a creditcard 3, a mirror 1, a pencil 2, and a pencil 1.
-> think: Now I find the second creditcard (3). Next, I need to take it.
-OK.
 > take creditcard 3 from countertop 1
-You pick up the creditcard 3 from the countertop 1.
-> think: Now I take the second creditcard (3). Next, I need to put it in/on dresser 1.
-OK.
 > go to dresser 1
-On the dresser 1, you see a creditcard 2, a mug 1, and a television 1.
 > put creditcard 3 in/on dresser 1
-You put the creditcard 3 in/on the dresser 1.
 """
     ),
     "look_at_obj_in_light": (
-        """react_examine_0:
-You are in the middle of a room. Looking quickly around you, you see a bed 1, a desk 1, a drawer 3, a drawer 2, a drawer 1, a garbagecan 1, a safe 1, a shelf 5, a shelf 4, a shelf 3, a shelf 2, a shelf 1, a sidetable 2, and a sidetable 1.
+        """react_examine_short:
 Your task is to: look at bowl under the desklamp.
-> think: To solve the task, I need to find and take a bowl, then find and use a desklamp. 
-OK. 
-> think: First I need to find a bowl. A bowl is more likely to appear in drawer (1-3), desk (1), sidetable (1-2), shelf (1-5), garbagecan (1). I can check one by one, starting with drawer 1.
-OK.
-> go to drawer 1
-On the drawer 1, you see nothing.
-> go to drawer 2
-The drawer 2 is closed.
-> open drawer 2
-You open the drawer 2. The drawer 2 is open. In it, you see nothing.
-> go to drawer 3
-The drawer 3 is closed.
-> open drawer 3
-You open the drawer 3. The drawer 3 is open. In it, you see nothing.
-> go to desk 1
-On the desk 1, you see a alarmclock 2, a book 1, a cellphone 1, a keychain 1, a laptop 2, a laptop 1, and a pen 3.
-> go to sidetable 1
-On the sidetable 1, you see a cd 1, a pen 1, and a pencil 1.
-> go to shelf 1
-On the shelf 1, you see nothing.
+> think: Find bowl, hold it, then find and use lamp.
 > go to shelf 2
-On the shelf 2, you see a bowl 1.
-> think: Now I find a bowl (1). Next, I need to take it.
-OK.
 > take bowl 1 from shelf 2
-You pick up the bowl 1 from the shelf 2.
-> think: Now I take a bowl (1). Next, I need to find a desklamp. A desklamp is more likely to appear in desk (1), sidetable (1-2), shelf (1-5), bed (1), drawer (1-3). I can check one by one, starting with desk 1.
-OK.
 > go to desk 1
-On the desk 1, you see a alarmclock 2, a book 1, a cellphone 1, a keychain 1, a laptop 2, a laptop 1, and a pen 3.
-> go to sidetable 1
-On the sidetable 1, you see a cd 1, a pen 1, and a pencil 1.
 > go to sidetable 2
-On the sidetable 2, you see a alarmclock 1, a desklamp 1, and a pen 2.
-> think: Now I find a desklamp (1). Next, I need to use it.
-OK.
 > use desklamp 1
-You turn on the desklamp 1.
+> look
 """
     ),
 }
@@ -246,6 +302,9 @@ class PolicyConfig:
     max_new_tokens: int
     history_window: int
     prompting_mode: str
+    enforce_step_order: bool = True
+    use_few_shot: bool = True
+    use_react_format: bool = True
 
 
 class LlamaActionPolicy:
@@ -255,6 +314,9 @@ class LlamaActionPolicy:
         self.max_new_tokens = cfg.max_new_tokens
         self.history_window = cfg.history_window
         self.prompting_mode = cfg.prompting_mode
+        self.enforce_step_order = cfg.enforce_step_order
+        self.use_few_shot = cfg.use_few_shot
+        self.use_react_format = cfg.use_react_format
 
         quantization_config = None
         torch_dtype = torch.bfloat16 if torch.cuda.is_available() else torch.float32
@@ -318,34 +380,85 @@ class LlamaActionPolicy:
         admissible_commands: Sequence[str],
         trajectory: Sequence[Tuple[str, str]],
         task_type: str,
+        goal_text: str | None = None,
     ) -> str:
         state_summary = self._summarize_trajectory(trajectory)
 
-        goal_text = "unknown"
-        goal_match = re.search(
-            r"your task is to:?\s*(.+?)(?:[.\n]|$)",
-            observation,
-            flags=re.IGNORECASE,
+        if not goal_text:
+            parsed_goal = "unknown"
+            goal_match = re.search(
+                r"your task is to:?\s*(.+?)(?:[.\n]|$)",
+                observation,
+                flags=re.IGNORECASE,
+            )
+            if goal_match:
+                parsed_goal = goal_match.group(1).strip()
+            goal_text = parsed_goal
+        few_shot = ""
+        if self.use_few_shot:
+            few_shot = REACT_FEW_SHOTS_BY_TASK.get(
+                task_type,
+                REACT_FEW_SHOTS_BY_TASK["pick_and_place_simple"],
+            )
+        target_obj, target_recep = _extract_goal_entities(goal_text)
+        choices = "\n".join([f"{i + 1}. {cmd}" for i, cmd in enumerate(admissible_commands)])
+        max_idx = len(admissible_commands)
+        example_entities = (
+            "egg, lettuce, pan, spraybottle, creditcard, bowl, diningtable, "
+            "stoveburner, toilet, dresser, desklamp"
         )
-        if goal_match:
-            goal_text = goal_match.group(1).strip()
-        few_shot = REACT_FEW_SHOTS_BY_TASK.get(task_type, REACT_FEW_SHOTS_BY_TASK["pick_and_place_simple"])
+        mandatory_step_block = ""
+        if self.enforce_step_order:
+            step_order = MANDATORY_STEP_ORDER.get(
+                task_type,
+                MANDATORY_STEP_ORDER["pick_and_place_simple"],
+            )
+            next_stage = _next_required_stage(task_type, trajectory, target_obj, target_recep)
+            step_order_text = "\n".join([f"{i + 1}. {step}" for i, step in enumerate(step_order)])
+            mandatory_step_block = (
+                "Mandatory step order (must follow strictly):\n"
+                f"{step_order_text}\n"
+                f"Current required step: {next_stage}\n"
+            )
+        mandatory_constraint_lines = ""
+        if self.enforce_step_order:
+            mandatory_constraint_lines = (
+                "- Follow the mandatory step order exactly.\n"
+                "- Never execute a later step before completing the current required step.\n"
+                "- For clean/heat/cool tasks, do not place target object before applying clean/heat/cool.\n"
+            )
+
+        output_format = (
+            "Thought: <1 concise sentence>\n"
+            f"Action: <single integer between 1 and {max_idx}>"
+            if self.use_react_format
+            else f"Action: <single integer between 1 and {max_idx}>"
+        )
 
         return (
             "You are an ALFWorld decision-making agent.\n"
-            "Follow the few-shot style.\n"
-            "Keep reasoning concise and output one next action.\n\n"
+            "You should imitate the decision pattern and reasoning process, but not imitate entities.\n"
+            "Choose exactly one next action from admissible commands.\n"
+            "Do not repeat a failed action unless there is new evidence.\n\n"
 
             f"Task type: {task_type}\n"
-            f"{few_shot}\n"
+            f"{few_shot}\n\n"
 
             f"Current observation:\n{observation}\n\n"
             f"Your goal is: {goal_text}\n"
+            f"Current target object: {target_obj}\n"
+            f"Current target receptacle/tool: {target_recep}\n"
+            f"{mandatory_step_block}"
+            "Reasoning constraints:\n"
+            "- Use few-shot for strategy only, never copy its entities.\n"
+            "- In Thought, reference only current goal/admissible entities.\n"
+            f"- Ignore example entities unless currently relevant: {example_entities}\n"
+            f"{mandatory_constraint_lines}"
 
             f"State summary:\n{state_summary}\n\n"
+            f"Admissible commands (numbered):\n{choices}\n\n"
             "Output format (must match):\n"
-            "Thought: <1-2 concise sentences>\n"
-            "Action: <one action>"
+            f"{output_format}"
         )
 
     def _choose_fallback(self, admissible_commands: Sequence[str]) -> str:
@@ -353,6 +466,41 @@ class LlamaActionPolicy:
             if _normalize_action(cmd) == "look":
                 return cmd
         return admissible_commands[0]
+
+    def _choose_non_repeating(
+        self,
+        admissible_commands: Sequence[str],
+        blocked_norm: str,
+    ) -> str:
+        priority_prefixes = ("take ", "put ", "move ", "heat ", "cool ", "clean ", "use ")
+        explore_prefixes = ("go to ", "open ")
+
+        for prefix_group in (priority_prefixes, explore_prefixes):
+            for cmd in admissible_commands:
+                norm = _normalize_action(cmd)
+                if norm == blocked_norm:
+                    continue
+                if any(norm.startswith(prefix) for prefix in prefix_group):
+                    return cmd
+
+        for cmd in admissible_commands:
+            norm = _normalize_action(cmd)
+            if norm != blocked_norm and norm != "look":
+                return cmd
+
+        return self._choose_fallback(admissible_commands)
+
+    def _same_observation(self, a: str, b: str) -> bool:
+        return re.sub(r"\s+", " ", a.strip().lower()) == re.sub(r"\s+", " ", b.strip().lower())
+
+    def _repeat_streak(self, trajectory: Sequence[Tuple[str, str]], action_norm: str) -> int:
+        streak = 0
+        for past_action, _ in reversed(trajectory):
+            if _normalize_action(past_action) == action_norm:
+                streak += 1
+            else:
+                break
+        return streak
 
     def _extract_action_candidate(self, raw_text: str) -> str:
         # BeliefUpdate 블록의 "Inventory:"를 액션으로 오인하지 않도록
@@ -379,16 +527,19 @@ class LlamaActionPolicy:
             return_dict=True,
         )
         model_inputs = {k: v.to(self.model.device) for k, v in model_inputs.items()}
-        gen_temperature = self.temperature if self.temperature > 0 else 0.7
-        generated = self.model.generate(
-            **model_inputs,
-            max_new_tokens=self.max_new_tokens,
-            do_sample=True,
-            temperature=gen_temperature,
-            top_p=self.top_p,
-            pad_token_id=self.tokenizer.pad_token_id,
-            eos_token_id=self.tokenizer.eos_token_id,
-        )
+        gen_kwargs = {
+            "max_new_tokens": self.max_new_tokens,
+            "pad_token_id": self.tokenizer.pad_token_id,
+            "eos_token_id": self.tokenizer.eos_token_id,
+        }
+        if self.temperature <= 0:
+            gen_kwargs["do_sample"] = False
+        else:
+            gen_kwargs["do_sample"] = True
+            gen_kwargs["temperature"] = self.temperature
+            gen_kwargs["top_p"] = self.top_p
+
+        generated = self.model.generate(**model_inputs, **gen_kwargs)
         prompt_len = model_inputs["input_ids"].shape[-1]
         new_tokens = generated[0][prompt_len:]
         return self.tokenizer.decode(new_tokens, skip_special_tokens=True).strip()
@@ -420,10 +571,6 @@ class LlamaActionPolicy:
             if 0 <= idx < len(admissible_commands):
                 return admissible_commands[idx]
 
-        near = difflib.get_close_matches(norm, list(normalized_map.keys()), n=1, cutoff=0.55)
-        if near:
-            return normalized_map[near[0]]
-
         return self._choose_fallback(admissible_commands)
 
     @torch.no_grad()
@@ -433,6 +580,7 @@ class LlamaActionPolicy:
         admissible_commands: Sequence[str],
         trajectory: Sequence[Tuple[str, str]],
         task_type: str = "pick_and_place_simple",
+        goal_text: str | None = None,
     ) -> Tuple[str, str]:
 
         prompt = self.build_prompt(
@@ -440,6 +588,7 @@ class LlamaActionPolicy:
             admissible_commands,
             trajectory,
             task_type,
+            goal_text,
         )
 
         messages = [
@@ -450,6 +599,19 @@ class LlamaActionPolicy:
 
         thought = self._extract_thought(raw_text)
         matched_action = self._match_action(raw_text, admissible_commands)
+
+        # Guard against getting stuck: if model keeps proposing the same action
+        # while observations are not changing, force a different admissible action.
+        matched_norm = _normalize_action(matched_action)
+        if trajectory:
+            last_action_norm = _normalize_action(trajectory[-1][0])
+            repeat_streak = self._repeat_streak(trajectory, matched_norm)
+            no_new_evidence = (
+                len(trajectory) >= 2
+                and self._same_observation(trajectory[-1][1], trajectory[-2][1])
+            )
+            if matched_norm == last_action_norm and (repeat_streak >= 2 or no_new_evidence):
+                matched_action = self._choose_non_repeating(admissible_commands, blocked_norm=matched_norm)
 
         return matched_action, thought
 
@@ -467,6 +629,9 @@ def get_llama_action_policy(
     max_new_tokens: int,
     history_window: int,
     prompting_mode: str = "react",
+    enforce_step_order: bool = True,
+    use_few_shot: bool = True,
+    use_react_format: bool = True,
     reuse: bool = True,
 ) -> LlamaActionPolicy:
     cfg = PolicyConfig(
@@ -479,6 +644,9 @@ def get_llama_action_policy(
         max_new_tokens=max_new_tokens,
         history_window=history_window,
         prompting_mode=prompting_mode,
+        enforce_step_order=enforce_step_order,
+        use_few_shot=use_few_shot,
+        use_react_format=use_react_format,
     )
     if reuse and cfg in _POLICY_CACHE:
         return _POLICY_CACHE[cfg]
